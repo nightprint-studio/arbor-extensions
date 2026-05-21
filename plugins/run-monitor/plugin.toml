@@ -1,0 +1,26 @@
+name        = "run-monitor"
+version     = "1.0.0"
+description = "Dedicated bottom panel for run-action services. Hides Service jobs from the global Jobs overlay and surfaces them here with click-through to the streaming Job Output."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "build"
+keywords    = ["run", "monitor", "services", "logs"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+# We call run-action.set_hide_services / get_hide_services and could in the
+# future call other plugins' service.export'd helpers (e.g. to enrich service
+# rows with provider-specific metadata).
+service_call = true
+
+[hooks]
+on_plugin_load   = true
+on_plugin_unload = true
+
+# We need run-action to expose the toggle service. Optional so we still load
+# (with a no-op claim attempt) when the user has run-action disabled.
+[[dependencies]]
+name     = "run-action"
+version  = ">=1.0.0"
+optional = true

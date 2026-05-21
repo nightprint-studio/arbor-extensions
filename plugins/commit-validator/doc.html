@@ -1,0 +1,83 @@
+<h1>Commit Validator</h1>
+<p>
+  Lints commit messages against the
+  <a href="https://www.conventionalcommits.org/">Conventional
+  Commits</a> specification plus a small set of optional rules
+  (ticket reference, subject length, body wrap). In strict mode the
+  plugin <strong>blocks</strong> the commit before it is created via
+  the <code>on_pre_commit</code> hook; in lenient mode it surfaces
+  the issues as a post-commit warning.
+</p>
+
+<h2>How it runs</h2>
+<ul>
+  <li><code>on_pre_commit</code> — strict mode only. Returns the
+      validation error string and the host aborts the commit.</li>
+  <li><code>on_commit</code> — runs after every successful commit. In
+      strict mode it shows a quiet success toast; in lenient mode it
+      shows a warning when the message has issues.</li>
+  <li>Right-click any commit in the graph and pick
+      <strong>✓ Validate Commit Message</strong> to lint a historical
+      message on demand.</li>
+  <li>Merge commits (<code>Merge …</code>) and revert commits
+      (<code>Revert "…"</code>) skip validation.</li>
+</ul>
+
+<h2>Required permissions</h2>
+<ul>
+  <li><code>git = "read"</code> — reads commit context from the hook
+      payload.</li>
+</ul>
+<p>No network or filesystem access; everything runs locally in Lua.</p>
+
+<h2>Default allowed types</h2>
+<p>
+  <code>feat</code> · <code>fix</code> · <code>docs</code> ·
+  <code>style</code> · <code>refactor</code> · <code>perf</code> ·
+  <code>test</code> · <code>build</code> · <code>ci</code> ·
+  <code>chore</code> · <code>revert</code>
+</p>
+
+<h2>Settings</h2>
+<p>
+  Open <strong>Plugin Manager → gear icon</strong> next to Commit
+  Validator. The gear opens the standard plugin-settings panel — a
+  full-height tree-navigated modal whose "Validation" entry groups the
+  rules into <em>General</em>, <em>Conventional Commits</em>,
+  <em>Ticket reference</em> and <em>Length limits</em> cards. All
+  settings are global (apply across every repo).
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Setting</th><th>Default</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td>Enable validation</td><td>✓ on</td><td>Master switch.</td></tr>
+    <tr><td>Strict mode</td><td>✓ on</td><td>When on, returning a
+        non-empty string from <code>on_pre_commit</code> aborts the
+        commit. When off, the commit is allowed and a warning toast
+        is shown afterwards.</td></tr>
+    <tr><td>Additional types</td><td>(empty)</td><td>Comma-separated
+        extras, e.g. <code>wip, hotfix, spike</code>.</td></tr>
+    <tr><td>Require scope</td><td>✗ off</td><td>Forces the
+        <code>feat(scope): …</code> shape.</td></tr>
+    <tr><td>Require ticket</td><td>✗ off</td><td>The message body OR
+        subject must contain a ticket key matching the regex
+        below.</td></tr>
+    <tr><td>Ticket regex</td><td><code>%f[%w]([A-Z][A-Z0-9]+%-%d+)%f[%W]</code></td><td>Lua
+        pattern. Default catches Linear / Jira / Shortcut keys
+        (<code>ABC-123</code>).</td></tr>
+    <tr><td>Max subject length</td><td>72</td><td>0 disables.</td></tr>
+    <tr><td>Max body line length</td><td>100</td><td>0 disables. Subject
+        and the blank-line separator are skipped — only body lines
+        are checked.</td></tr>
+  </tbody>
+</table>
+
+<h2>Valid examples</h2>
+<pre><code>feat(auth): add OAuth2 login flow
+
+Adds the GitHub OAuth flow used by the new login modal.
+Closes ARBOR-42.
+
+fix: prevent crash on empty repo
+chore!: drop Node 14 support
+Merge branch 'develop' into main</code></pre>

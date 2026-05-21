@@ -1,0 +1,157 @@
+<h1>compile-action</h1>
+<p>
+  Build runner. Auto-detects the project type and lets you compile/package it
+  directly from the Activity Bar — no terminal required. Output streams in
+  real time to the built-in Jobs panel.
+</p>
+<p>
+  The sibling <strong>run-action</strong> plugin handles launching your
+  application and depends on this plugin for the build step.
+</p>
+
+<h2>Getting Started</h2>
+<p>
+  Open a repository. The plugin scans the working directory on every repo open
+  and tab switch, detects the build system automatically, and adds a
+  <strong>Build</strong> combo button to the <strong>RepoActions</strong> row
+  (just below the branch name in the sidebar).
+</p>
+<ol>
+  <li>Open a repo — the combo appears with a default build config selected.</li>
+  <li>Click the <strong>🔨</strong> icon to build the selected config.</li>
+  <li>Click the <strong>▾</strong> dropdown arrow to switch configuration.</li>
+  <li>Watch output in the <strong>Job Output Panel</strong> (status-bar badge → ↗).</li>
+</ol>
+<p>Keyboard shortcut: <kbd>Ctrl</kbd>+<kbd>F9</kbd> triggers the selected build configuration.</p>
+
+<h2>Build &amp; Run sidebar</h2>
+<p>
+  An IntelliJ-style tree sidebar registered on the <strong>right</strong>
+  ActivityBar (Hammer icon, "Build &amp; Run"). The body shows two top-level
+  groups for the active repo:
+</p>
+<ul>
+  <li><strong>Build configurations</strong> — every saved build config from
+      <em>project</em> + <em>global</em> storage, icon per template
+      (<code>Hammer</code> for Maven/Gradle, <code>Box</code> for Cargo,
+      <code>Package</code> for npm, <code>Wrench</code> for Make). The
+      currently-selected config carries a <code>default</code> badge. Click
+      a row to run it; double-click and Enter trigger
+      <code>compile:run</code>.</li>
+  <li>The detected toolchain section — Maven, Cargo, Gradle, npm or Make
+      with their canonical lifecycle / tasks / scripts. Multi-module projects
+      are walked recursively: parent + children for Maven
+      (<code>&lt;modules&gt;</code> in pom.xml), workspace members for Cargo
+      (<code>[workspace] members</code>, including <code>"crates/*"</code>
+      style globs — expanded by listing the directory and keeping subdirs
+      that contain a <code>Cargo.toml</code>), npm <code>workspaces</code>.
+      Each module exposes its own Lifecycle / Tasks / Scripts subsection.</li>
+</ul>
+<p>
+  The header has a search field and toolbar buttons populated by
+  contributions — <code>compile-action</code> ships <em>Refresh project
+  tree</em>, <em>New run configuration…</em>, <em>Settings</em>; other
+  plugins (e.g. <code>run-action</code>) contribute their own buttons via
+  the contribution model documented in <em>Plugin Development → API: UI →
+  Tree-kind sidebars</em>.
+</p>
+
+<h3>Contribution points exposed by this plugin</h3>
+<table class="shortcuts-table">
+  <thead><tr><th>Point</th><th>Used by</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>compile-action:compile:toolbar</code></td><td>Any plugin</td><td>Buttons in the sidebar header.</td></tr>
+    <tr><td><code>compile-action:compile:tree.section</code></td><td>e.g. <code>run-action</code> for "Run configurations"</td><td>Top-level section nodes appended to the tree.</td></tr>
+    <tr><td><code>compile-action:compile:node_action</code></td><td>e.g. <code>run-action</code>, <code>maven-update-deps</code></td><td>Hover-revealed icon buttons per row, filtered by node <code>kind</code> / <code>data</code>.</td></tr>
+    <tr><td><code>compile-action:compile:node_decorator</code></td><td>Any plugin</td><td>Always-visible badge / icon decorators per row.</td></tr>
+    <tr><td><code>compile-action:compile:context_menu</code></td><td>e.g. <code>maven-update-deps</code></td><td>Right-click menu items per row.</td></tr>
+    <tr><td><code>compile-action:compile:dependency_provider</code></td><td>e.g. <code>maven-update-deps</code></td><td>Adds <em>Show dependencies</em> to the right-click menu and provides the modal's tree.</td></tr>
+    <tr><td><code>compile-action:compile:footer</code></td><td>Any plugin</td><td>Items in the sidebar footer.</td></tr>
+  </tbody>
+</table>
+
+<h2>Supported templates</h2>
+<p>
+  Each build configuration is backed by a <em>template</em>. The template declares
+  the editable fields (goals, profiles, toolchain, env, …) and generates the
+  final command string on save.
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Template</th><th>Template-specific fields</th><th>Toolchain</th></tr></thead>
+  <tbody>
+    <tr><td><code>maven</code></td><td>goals, profiles, skip_tests</td><td>JDK</td></tr>
+    <tr><td><code>gradle</code></td><td>tasks, refresh_deps, init_script</td><td>JDK</td></tr>
+    <tr><td><code>cargo</code></td><td>subcommand, features, release, target, backtrace</td><td>Rust</td></tr>
+    <tr><td><code>npm</code></td><td>package_manager (npm / yarn / pnpm), script</td><td>Node.js</td></tr>
+    <tr><td><code>make</code></td><td>target</td><td>—</td></tr>
+  </tbody>
+</table>
+<p>
+  Detection seeds a starter set on first repo open: <code>pom.xml</code> → 5 Maven
+  configs, <code>build.gradle(.kts)</code> → 3 Gradle, <code>Cargo.toml</code> →
+  5 Cargo, <code>package.json</code> → 3 npm, <code>Makefile</code> → 3 Make,
+  <code>src-tauri/tauri.conf.json</code> → Cargo + frontend set, <code>go.mod</code>
+  → single Make-style entry.
+</p>
+
+<h2>Build Configurations modal</h2>
+<p>
+  Opens from the combo's <strong>⚙ Project settings</strong> entry. The modal
+  uses an IntelliJ-style tree layout: templates group the configs on the left,
+  the selected config's editor appears on the right. A toolbar at the top of
+  the nav provides <kbd>+▾</kbd> (new from template), <kbd>−</kbd> (remove) and
+  <kbd>📋</kbd> (duplicate). Add / remove / duplicate update the tree and
+  content <em>in place</em> — no modal flicker.
+</p>
+<p>
+  Each config stores <code>toolchain_id</code> (optional pin to a specific
+  JDK / Node / Rust registered in <strong>Plugin Preferences</strong>). When
+  empty, the active toolchain for the template kind is used; when set, its env
+  (e.g. <code>JAVA_HOME</code>) is injected. Explicit keys in the config's
+  <code>env</code> map always win.
+</p>
+
+<h2>JDK / Node / Rust toolchains</h2>
+<p>
+  Register installations in <strong>Plugin Preferences</strong> (gear icon in
+  the Plugin Manager). The "Detection" card auto-discovers JDK via
+  <code>JAVA_HOME</code>, Node from <code>PATH</code>, Rust from
+  <code>~/.cargo/bin/cargo</code>. The active entry per kind is the default
+  when no <code>toolchain_id</code> is pinned on the config.
+</p>
+
+<h2>Exposed services</h2>
+<p>These services can be consumed by other plugins via <code>arbor.service.call</code>:</p>
+<ul>
+  <li>
+    <code>compile-action.spawn_build({ repo_path, build_id? })</code> — starts a build.
+    Returns <code>{ ok, build_cfg, job_id, java_home, already_running? }</code>.
+    If a build is already running for the repo, reuses it (<code>already_running = true</code>).
+  </li>
+  <li><code>compile-action.get_build_config({ id })</code> → full config table or <code>nil</code>.</li>
+  <li><code>compile-action.list_build_configs()</code> → <code>{ project, global }</code>.</li>
+  <li><code>compile-action.get_selected_build_id()</code> → <code>{ id }</code>.</li>
+  <li><code>compile-action.is_building({ repo_path })</code> → <code>{ building, job_id? }</code>.</li>
+  <li>
+    <code>compile-action.resolve_java_home({ build_id? })</code> →
+    <code>{ ok, java_home, build_id, template_id }</code> or
+    <code>{ ok = false, error }</code> when the active build isn't a JVM
+    template. Mirrors the same toolchain rules <code>spawn_build</code>
+    uses (per-config <code>toolchain_id</code> → active JDK fallback) so
+    callers like <code>deps-explorer</code> can run <code>mvn</code> /
+    <code>gradle</code> under the JDK the user actually selected.
+  </li>
+</ul>
+
+<h2>Plugin events</h2>
+<p>Emitted via <code>arbor.events.emit</code>:</p>
+<ul>
+  <li>
+    <code>compile-action:build-started</code> —
+    <code>{ repo_path, build_cfg, job_id }</code>
+  </li>
+  <li>
+    <code>compile-action:build-done</code> —
+    <code>{ repo_path, success, cancelled, exit_code, build_cfg, job_id, java_home }</code>
+  </li>
+</ul>

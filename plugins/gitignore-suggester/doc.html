@@ -1,0 +1,54 @@
+<h2>Gitignore Suggester</h2>
+<p>
+  Scans untracked files in the active repository and proposes
+  well-known <code>.gitignore</code> patterns when it spots common
+  build outputs, IDE metadata, OS junk, or potential secret files.
+</p>
+
+<h3>How it works</h3>
+<ul>
+  <li>Every time you open a repo or switch tab, the plugin runs a
+      silent scan. If untracked files match any of its catalog
+      patterns it shows a transient toast with a <em>Review</em>
+      button.</li>
+  <li>The review modal lists each suggestion with a few example paths
+      so you understand <em>why</em> the entry is being suggested.
+      You tick what you want to ignore and submit; the plugin
+      appends the selected lines to <code>.gitignore</code> under a
+      <code># Added by gitignore-suggester</code> header.</li>
+  <li>Anything you <strong>untick</strong> is remembered as
+      "dismissed" for that repository — the next scan won't propose it
+      again. Patterns added to <code>.gitignore</code> directly are
+      naturally skipped on the next scan.</li>
+</ul>
+
+<h3>Pattern catalog</h3>
+<p>
+  The plugin recognises common ecosystems out of the box: Rust
+  (<code>target/</code>), Node (<code>node_modules/</code>),
+  Python (<code>__pycache__/</code>, <code>.venv/</code>),
+  .NET / Java (<code>bin/</code>, <code>obj/</code>),
+  IDE caches (<code>.vscode/</code>, <code>.idea/</code>,
+  <code>.vs/</code>), generic build dirs (<code>dist/</code>,
+  <code>build/</code>, <code>out/</code>), bundler caches
+  (<code>.next/</code>, <code>.nuxt/</code>,
+  <code>.svelte-kit/</code>, <code>.turbo/</code>,
+  <code>.gradle/</code>), OS junk (<code>.DS_Store</code>,
+  <code>Thumbs.db</code>, <code>desktop.ini</code>), logs / swap
+  files (<code>*.log</code>, <code>*.swp</code>, <code>*.bak</code>)
+  and environment files (<code>.env</code>,
+  <code>.env.local</code>, <code>.env.*.local</code>).
+</p>
+
+<h3>Manual entry points</h3>
+<p>
+  Both available from the <strong>Command Palette</strong>
+  (<kbd>Ctrl+K</kbd>):
+</p>
+<ul>
+  <li><strong>Suggest .gitignore entries</strong> — opens the review
+      modal on demand, even if no toast appeared.</li>
+  <li><strong>Reset dismissed gitignore suggestions</strong> — clears
+      the per-repo dismissed list and immediately re-opens the modal,
+      handy when you change your mind about an earlier dismissal.</li>
+</ul>

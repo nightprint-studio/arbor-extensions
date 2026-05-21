@@ -1,0 +1,29 @@
+<h2>Chunk Merger — Binary concatenation</h2>
+
+<p>Companion plugin to <strong>Cloud Storage</strong>. Reassembles a remote object that was previously uploaded in multiple parts by concatenating the downloaded chunks <em>byte-for-byte</em> in the order chosen by the user (or by last-modified date in the <em>auto</em> mode).</p>
+
+<h3>When this handler fits</h3>
+
+<ul>
+  <li>Split archives (<code>foo.tar.gz.001</code>, <code>foo.tar.gz.002</code>, …) where every part is a raw byte slice of the final file.</li>
+  <li>Manually-chunked uploads produced by a pipeline that just sliced a single blob into N parts.</li>
+  <li>Any concatenation-safe format (HLS <code>.ts</code> playlists, log roll-ups, raw binary streams).</li>
+</ul>
+
+<h3>When it does NOT fit</h3>
+
+<ul>
+  <li>ZIP / 7z / RAR multi-volume archives — those need the original tool to reopen the catalog.</li>
+  <li>Video / audio container muxing (MP4, MKV, WebM) — needs <code>ffmpeg -c copy</code> or similar.</li>
+  <li>Any format where the parts are independent files that must be merged structurally, not bytewise.</li>
+</ul>
+
+<p>If multiple chunk-handler plugins are installed, the cloud-storage sidebar prompts you to pick one each time you run <em>Download chunks…</em>. Install handlers tailored to your specific format alongside this one — they coexist.</p>
+
+<h3>Cancellation</h3>
+
+<p>The Stop button on the OperationsOverlay card aborts the operation cooperatively: the handler checks the shared cancel flag (<code>arbor.cloud.is_cancelled</code>) before touching the filesystem, so an early cancel never produces a partial output file. Cancelling <em>during</em> the host-side concat is bounded by the chunk size opendal uses internally and resolves on the next chunk boundary.</p>
+
+<h3>Cleanup</h3>
+
+<p>On success, cloud-storage deletes the per-stream temp directory (<code>&lt;output&gt;.chunks/</code>) and the chunk files inside it. On failure the temp directory is preserved so you can inspect the partial state or retry without re-downloading.</p>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-label="run-action">
+  <!-- Play triangle (filled with currentColor) -->
+  <path d="M9 5 L20 12 L9 19 Z" fill="currentColor" />
+  <!-- Speed lines behind the triangle: motion -->
+  <path d="M2 9 L6 9" />
+  <path d="M2 12 L6 12" />
+  <path d="M2 15 L6 15" />
+</svg>

@@ -1,0 +1,15 @@
+name        = "cipher-studio"
+version     = "1.0.0"
+description = "Encode / decode text with classical ciphers and old-school encodings (ROT13, Vigenère, Base64, Morse, …). One Lua file per algorithm — no Rust deps."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["cipher", "encoding", "rot13", "base64", "morse"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+# No host capabilities needed — all encoding/cipher work is pure Lua.
+[permissions]
+
+[hooks]
+on_plugin_load = true

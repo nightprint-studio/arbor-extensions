@@ -1,0 +1,27 @@
+name        = "source-export"
+version     = "0.1.0"
+description = "Workflow engine for exporting source code to external repos: declarative profiles with stages/steps, parallel jobs, resume-from-failure, cross-repo sequences."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["export", "pipeline", "workflow", "automation"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+# Output folder lives outside the active repo (temp or a user-configured dir).
+fs       = "write"
+fs_scope = ["*"]
+# `write` covers the optional commit/push steps; read access is implied.
+git      = "write"
+# Spawns shell / maven / gradle / npm / docker / external tools.
+terminal = "any"
+env_read = true
+
+[hooks]
+on_plugin_load             = true
+on_repo_open               = true
+on_tab_switch              = true
+on_pipeline_started        = true
+on_pipeline_done           = true
+on_pipeline_run_request    = true

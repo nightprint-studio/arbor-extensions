@@ -1,0 +1,26 @@
+name        = "cloud-storage"
+version     = "1.0.0"
+description = "Browse, upload, download and sync files between Arbor and Google Cloud Storage (S3 / Azure coming soon)."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["cloud", "gcs", "s3", "storage", "sync"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+fs       = "write"           # Local filesystem read/write for downloads & uploads.
+fs_scope = ["*"]              # User picks paths via the native picker — can be anywhere.
+# Required for chunk-merger contributions: chunks.lua calls
+# `arbor.service.call("<handler-plugin>.merge", …):ok/err` after a multi-chunk
+# download to drive the merge phase. Without this permission `arbor.service.call`
+# is nil and the merge handler invocation raises silently inside the
+# `download-many-done` hook — leaving the OperationsOverlay card stuck on
+# "Concatenating chunks…" forever (no :ok/:err callback ever fires, so
+# `report_done` is never reached).
+service_call = true
+
+[hooks]
+on_plugin_load = true
+on_repo_open   = false        # Cloud connections are global, not per-repo.
+on_tab_switch  = false

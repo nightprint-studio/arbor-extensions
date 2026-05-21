@@ -1,0 +1,17 @@
+name        = "toml-studio"
+version     = "1.0.0"
+description = "IntelliJ-style TOML viewer + editor: lossless tree edits, JSONPath query, syntax-highlighted text. Backed by toml_edit on the host (preserves comments + formatting natively); designed to migrate to the subprocess plugin runtime once it lands."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["toml", "viewer", "editor", "jsonpath"]
+arbor_api   = 1
+experimental = true
+
+[permissions]
+# `fs = "read"` is here for completeness — the picker + parsing are both
+# handled host-side, so the plugin doesn't actually call arbor.fs at runtime.
+fs = "read"
+
+[hooks]
+on_plugin_load = true

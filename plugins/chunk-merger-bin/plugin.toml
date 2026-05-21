@@ -1,0 +1,28 @@
+name        = "chunk-merger-bin"
+version     = "1.0.0"
+description = "Binary chunk concatenation handler for the cloud-storage plugin. Reassembles N downloaded chunks into a single output file by raw byte concatenation."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["binary", "chunks", "merge", "cloud-storage"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+# The merge service calls `arbor.cloud.concat_files{ inputs, output }` which
+# reads the chunk files from the temp dir picked by cloud-storage and writes
+# the merged blob to the user-chosen output path. Both happen on the local
+# filesystem under paths the user has just picked via the native picker.
+fs       = "write"
+fs_scope = ["*"]
+# Required so `arbor.service.export("merge", …)` at plugin-load time can
+# register the merge entry point that cloud-storage's chunks.lua calls
+# via `arbor.service.call("chunk-merger-bin.merge", …)`. Without this
+# permission the export raises at load and the plugin disappears into
+# load_failures.
+service_export = true
+
+[hooks]
+on_plugin_load = true
+on_repo_open   = false
+on_tab_switch  = false

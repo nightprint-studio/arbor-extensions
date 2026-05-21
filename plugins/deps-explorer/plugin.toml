@@ -1,0 +1,33 @@
+name        = "deps-explorer"
+version     = "1.0.0"
+description = "IntelliJ-style dependency explorer for Maven, Gradle, Cargo and npm. Shows resolved deps + reverse usages + Maven Central latest-version checks."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["dependencies", "maven", "gradle", "cargo", "npm"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+network  = ["repo1.maven.org", "registry.npmjs.org", "crates.io"]   # Maven Central maven-metadata.xml + npm registry /<pkg>/latest + crates.io /api/v1/crates/<name> — used by maven_central.lua / npm_registry.lua / crates_io.lua via arbor.http.get (native reqwest, no curl).
+fs       = "write"        # Reads pom.xml / Cargo.toml / package.json / build.gradle inside arbitrary repo dirs and writes per-request temp files in the OS temp dir.
+fs_scope = ["*"]          # Unrestricted: needs cross-repo access (default sandbox would only allow the active repo).
+terminal = "any"          # Spawns mvn, gradle, cargo, npm, pnpm, yarn for the resolver runs.
+env_read = true
+service_call = true       # Calls compile-action.resolve_java_home to pick up the active JDK.
+toolchain    = "read"     # Falls back to the active JDK when the active build isn't a JVM build.
+
+
+# Hard dependency on compile-action: we contribute to the contribution points
+# it owns (context_menu, node_action) and we call its resolve_java_home service.
+[[dependencies]]
+name    = "compile-action"
+version = ">=1.0.0"
+
+[hooks]
+on_plugin_load       = true
+# Fired when a repo is permanently removed from Arbor (deregistered, last
+# workspace removed, or last tab closed while orphaned). We use it to drop
+# the per-module dependency-tree cache entries belonging to that repo —
+# everything else (registry caches, etc.) stays since it's keyed by package.
+on_repo_deregistered = true

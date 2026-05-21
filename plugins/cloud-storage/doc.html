@@ -1,0 +1,171 @@
+<h2>Cloud Storage</h2>
+
+<p>Browse, upload, download and synchronise objects between Arbor and the cloud. Backed by <a href="https://opendal.apache.org/" target="_blank" rel="noopener">Apache OpenDAL</a>, with first-class support for <strong>Google Cloud Storage</strong>, <strong>Amazon S3 (and S3-compatible services like R2 / MinIO)</strong>, and <strong>Azure Blob Storage</strong>.</p>
+
+<h3>Setting up a connection</h3>
+
+<p>Click the <strong>Cloud</strong> icon in the right activity bar to open the sidebar, then click the <strong>Manage connections</strong> button (gear icon) in the toolbar. A two-pane modal opens — left rail groups every saved connection by provider, right pane edits the selected one. Click <strong>+ Add Google Cloud Storage</strong> to create a new connection draft. The same modal also exposes <em>edit</em> (just click a row) and <em>delete</em> (hover, click trash). Click <strong>Save</strong> at the bottom to commit all pending changes, <strong>Close</strong> to discard them. You can also reach it from the Command Palette via <em>Cloud Storage · Manage connections…</em>.</p>
+
+<p>For each connection you set:</p>
+
+<ul>
+  <li><strong>Name</strong> — a friendly label shown in the picker.</li>
+  <li><strong>Provider</strong> — currently only GCS is selectable.</li>
+  <li><strong>Default bucket</strong> — shown when the sidebar first opens. You can still browse other buckets at runtime by editing the connection.</li>
+  <li><strong>Project id</strong> — optional. Most object ops don't need it.</li>
+  <li><strong>Authentication</strong> — pick one of five methods:</li>
+</ul>
+
+<table>
+  <tr><th>Method</th><th>When to use</th><th>What we persist</th></tr>
+  <tr>
+    <td><strong>Service account file</strong></td>
+    <td>Most common for CI / server roles. Download the JSON key from the GCP console once.</td>
+    <td>Just the path to the file. The key itself stays on disk.</td>
+  </tr>
+  <tr>
+    <td><strong>Service account inline</strong></td>
+    <td>You want to roam between machines and prefer the key in your keyring.</td>
+    <td>The JSON content goes to the OS keychain (<code>cloud-storage / gcs/&lt;config-id&gt;</code>).</td>
+  </tr>
+  <tr>
+    <td><strong>Application Default Credentials (ADC)</strong></td>
+    <td>You already ran <code>gcloud auth application-default login</code> or set <code>GOOGLE_APPLICATION_CREDENTIALS</code>.</td>
+    <td>Nothing — the file is discovered fresh on every connect.</td>
+  </tr>
+  <tr>
+    <td><strong>gcloud CLI</strong></td>
+    <td>You have the Google Cloud SDK installed and just want to ride your <code>gcloud</code> session.</td>
+    <td>Nothing — the CLI is spawned on every connect for a fresh access token.</td>
+  </tr>
+  <tr>
+    <td><strong>OAuth user</strong></td>
+    <td>End-user accounts where you can't issue a service account. Register a Desktop OAuth client in GCP.</td>
+    <td>Refresh token JSON in the keychain (<code>cloud-storage / gcs/&lt;config-id&gt;/oauth</code>). Access tokens are refreshed automatically.</td>
+  </tr>
+</table>
+
+<p>Use <strong>Test connection</strong> at the bottom of the form to validate auth and bucket reachability before saving — the report names the auth method and (when known) the service-account email or user identity behind the token.</p>
+
+<h3>Browsing</h3>
+
+<ul>
+  <li><strong>Double-click a folder</strong> to navigate into it; the header row shows the breadcrumb of clickable chips.</li>
+  <li><strong>Double-click an object</strong> to download — you'll be asked where to save it locally.</li>
+  <li><strong>Type a path directly</strong>: click the pencil icon at the right of the breadcrumb (or double-click anywhere on the breadcrumb band) to flip into edit mode, type something like <code>data/2024/chunks/</code> and press <kbd>Enter</kbd>. If the prefix has no objects, a non-blocking warning notification surfaces so you can tell a typo from "empty folder".</li>
+  <li><strong>Listings are capped</strong> by the <em>Max entries per folder</em> preference (Settings → Cloud Storage → Browser). The sidebar warns you if more exist; refine the breadcrumb or use Remote search.</li>
+  <li><strong>Right-click any row</strong> for the per-item context menu.</li>
+</ul>
+
+<h3>Uploading</h3>
+
+<ol>
+  <li>Click the <strong>↑</strong> button in the sidebar toolbar.</li>
+  <li>Pick a local file in the native picker.</li>
+  <li>Confirm the target key (prefilled with the current breadcrumb + filename) and whether to overwrite if it exists.</li>
+</ol>
+
+<p>The upload streams in 256&nbsp;KiB chunks; the Jobs overlay shows live progress, throughput and ETA. Cancel from there at any time and the transfer aborts on the next chunk boundary.</p>
+
+<h3>Recursive sync</h3>
+
+<p>From the Command Palette (<kbd>Ctrl+K</kbd>):</p>
+<ul>
+  <li><strong>Cloud Storage · Sync down</strong> — pulls a remote prefix into a local folder.</li>
+  <li><strong>Cloud Storage · Sync up</strong> — pushes a local folder under a remote prefix.</li>
+</ul>
+
+<p>Both flows ask you to confirm the remote prefix and offer an optional <strong>Delete files at the destination that don't exist at the source</strong> checkbox. With that on, the sync is a mirror (matches one side exactly); off, it's a merge.</p>
+
+<h3>Background jobs</h3>
+
+<p>Every upload, download and sync registers a job in the Arbor Jobs registry. The status bar's spinner counts them; click it to open the floating overlay with per-job cancel buttons. The Job Output panel shows a line-per-chunk progress feed (current bytes, throughput) so you can watch large transfers without leaving Arbor.</p>
+
+<h3>Security notes</h3>
+
+<ul>
+  <li>Secrets that don't fit in plain plugin settings (inline SA JSON, OAuth refresh tokens) live exclusively in your OS keychain under the service name <code>arbor-cloud-storage</code>. They are never written to disk by this plugin and never appear in exported settings.</li>
+  <li>The OAuth flow uses installed-app PKCE with a loopback listener on <strong>127.0.0.1:7732</strong>. Make sure no other service is listening on that port while you authorize.</li>
+  <li>Service-account JSON pasted into the inline form is wiped from the textarea on save and never re-displayed.</li>
+</ul>
+
+<h3>Wildcard search</h3>
+
+<p>The search row at the top of the sidebar has two modes — toggle between them with the filter/globe icon on the right of the input:</p>
+
+<ul>
+  <li><strong>Local</strong> (default) — substring filter on rows already loaded; cheap, no network.</li>
+  <li><strong>Remote</strong> — input shows an accent stripe; Enter runs a wildcard search against the bucket, scoped to the current breadcrumb folder. If you start typing <code>*</code> or <code>?</code> while still in Local mode, a one-time hint appears with a <em>Search remote</em> button that promotes the query for you.</li>
+</ul>
+
+<p>Pattern semantics:</p>
+
+<table>
+  <tr><th>Pattern</th><th>Meaning</th></tr>
+  <tr><td><code>*</code></td><td>matches any sequence of characters — including <code>/</code>, so it walks across sub-folders</td></tr>
+  <tr><td><code>**</code></td><td>alias of <code>*</code> (kept for users coming from Ant/gitignore-style globs)</td></tr>
+  <tr><td><code>?</code></td><td>matches exactly one non-separator char</td></tr>
+</table>
+
+<p>Examples:</p>
+<ul>
+  <li><code>*/0</code> — every object whose path ends in <code>/0</code> at any depth</li>
+  <li><code>data/2024/*/chunk_*</code> — every <code>chunk_*</code> file anywhere under <code>data/2024/</code></li>
+  <li><code>*error.log</code> — every <code>error.log</code> anywhere under the search scope</li>
+  <li><code>*.bak</code> — every <code>.bak</code> file under the current folder (or bucket if scope = entire)</li>
+</ul>
+
+<p>The matcher is permissive on purpose: a single <code>*</code> walks the whole sub-tree, so <code>chunk_*</code> finds chunks in any nested folder under the current breadcrumb — you rarely need <code>**</code>.</p>
+
+<p><strong>Scope:</strong> by default the search runs under the current breadcrumb folder. Switch to "Entire bucket" only when needed — recursive listing of a large bucket can take seconds or minutes.</p>
+
+<p>Results render as a flat list (full paths) in the sidebar. Double-click downloads; right-click works as on regular file rows (multi-select supported — useful for picking N chunks scattered across folders and feeding them to <em>Download chunks (custom order)</em>). Click the <em>clear ✕</em> chip in the breadcrumb to exit search mode and go back to browsing.</p>
+
+<p>The result list is capped at 5000 matches; if you hit the cap, refine the pattern to narrow the scope.</p>
+
+<h3>Bulk operations &amp; chunk-merge</h3>
+
+<p>Select multiple files in the sidebar (<kbd>Ctrl</kbd>+click, <kbd>Shift</kbd>+click for ranges, <kbd>Esc</kbd> to clear). The context menu switches to bulk mode:</p>
+
+<ul>
+  <li><strong>Download files…</strong> — pick a local folder; every selected object is downloaded in parallel (capped at <em>parallel downloads</em>, set in Settings → Cloud Storage → Preferences, default 4). A floating progress modal shows per-file bars, aggregate throughput and ETA, and has a Cancel button that aborts at the next chunk boundary.</li>
+  <li><strong>Delete files…</strong> — confirms once for the whole batch, deletes each object, refreshes the listing.</li>
+</ul>
+
+<p>When at least one <strong>chunk-merger plugin</strong> is installed, two extra entries appear:</p>
+
+<ul>
+  <li><strong>Download chunks (auto-order by date)</strong> — sorts the selected objects by last-modified ascending, downloads them to a temp dir (<code>&lt;output&gt;.chunks/</code>), then hands the local paths to the chunk-handler plugin which writes the merged output. Tie-break is alphabetic on path when timestamps match.</li>
+  <li><strong>Download chunks (custom order…)</strong> — opens a drag-reorder picker so you can place the parts manually. Same flow as above once you click Continue.</li>
+</ul>
+
+<p>The progress modal switches to a "Merge" phase once the downloads finish; the chunk-handler can push a per-step note (e.g. <em>Concatenating 2/3…</em>) through <code>arbor.cloud.report_progress</code>.</p>
+
+<h3>Extending the plugin (chunk-merger contributions)</h3>
+
+<p>The plugin exposes one contribution point: <code>cloud-storage:cloud:chunk-handlers</code>. A handler plugin contributes a record and exports a service:</p>
+
+<pre><code>arbor.ui.contribute("cloud-storage:cloud:chunk-handlers", {
+  id = "binary-concat",
+  payload = {
+    label   = "Binary concatenation",
+    icon    = "Combine",
+    service = "my-chunk-plugin.merge",
+  },
+})
+
+arbor.service.export("merge", function(args)
+  -- args.stream_id    : string (also used for arbor.cloud.is_cancelled checks)
+  -- args.inputs       : [string]  local paths in the chosen order
+  -- args.output       : string    user-picked target path
+  -- args.source_paths : [string]  original remote paths (for logging)
+  -- args.tempdir      : string    where `inputs` live (cleaned up on ok)
+  local ok, err = arbor.cloud.concat_files{ inputs = args.inputs, output = args.output }
+  return ok and { ok = true } or { ok = false, error = tostring(err) }
+end)</code></pre>
+
+<p>If more than one chunk-handler plugin is installed, the user is prompted to pick one each time. The contribution registry is re-scanned every time the sidebar opens, so installing or disabling a handler is reflected on the next visit.</p>
+
+<h3>Heads-up — early version</h3>
+
+<p>This plugin currently ships with its heavy dependencies (opendal) bundled directly in the Arbor host binary, the same way <strong>JSON Studio</strong> does. When the WASM plugin runtime lands, the entire host-side cloud module is deleted and the plugin gains its own WASM crate. The Lua surface (<code>arbor.cloud.*</code>) is designed to stay backwards-compatible across that migration, but the in-process Tauri commands (<code>cloud_list</code>, <code>cloud_download</code>, …) will go away.</p>

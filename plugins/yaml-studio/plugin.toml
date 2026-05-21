@@ -1,0 +1,17 @@
+name        = "yaml-studio"
+version     = "1.0.0"
+description = "IntelliJ-style YAML viewer: lazy tree, JSONPath query, syntax-highlighted text. Read-only in Phase 5.a; lossless edit + cross-refs + schema arrive in 5.b/5.c. Backed by serde_yml on the host."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["yaml", "viewer", "editor", "jsonpath"]
+arbor_api   = 1
+experimental = true
+
+[permissions]
+# `fs = "read"` is here for completeness — the picker + parsing are both
+# handled host-side, so the plugin doesn't actually call arbor.fs at runtime.
+fs = "read"
+
+[hooks]
+on_plugin_load = true

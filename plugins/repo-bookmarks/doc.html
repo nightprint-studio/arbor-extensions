@@ -1,0 +1,39 @@
+<h2>Repo Bookmarks</h2>
+<p>
+  Pin frequently-touched files in the active repository under a custom
+  label and reopen them from the Command Palette without hunting
+  through the file tree.
+</p>
+
+<h3>Workflow</h3>
+<ul>
+  <li><strong>Bookmark a file…</strong> — opens the file picker rooted
+      at the repo, then asks for a label (pre-filled with the
+      basename so you can usually just hit Enter).</li>
+  <li><strong>Open bookmark…</strong> — pick one from a dropdown and
+      hit Open. The file is handed to the OS' default handler via
+      <code>arbor.ui.open_path</code>.</li>
+  <li><strong>Manage bookmarks…</strong> — list view with rename
+      (pencil) and delete (trash). Bookmarks whose target no longer
+      exists on disk are tagged <span style="color:#e06c75">missing</span>
+      so cleanup is one click away.</li>
+</ul>
+
+<h3>Storage</h3>
+<p>
+  Bookmarks live in <code>arbor.settings.project</code> under the key
+  <code>bookmarks</code>, JSON-encoded as
+  <code>[{ "label": "…", "path": "/abs/path" }]</code>. Storing them
+  per-repo means the same plugin works across every project without
+  collisions; switching tabs swaps the bookmark set automatically.
+</p>
+
+<h3>Notes</h3>
+<ul>
+  <li>Paths are stored absolute, but the picker shows the
+      repo-relative form when applicable for readability.</li>
+  <li>Duplicates are silently rejected: a path is unique within its
+      repo's list.</li>
+  <li>The plugin never modifies the file it points to — opening goes
+      through the system handler (your editor, browser, etc.).</li>
+</ul>

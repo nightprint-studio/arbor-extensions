@@ -1,0 +1,58 @@
+<h2>JSON Studio</h2>
+
+<p>An IntelliJ-style inspector for JSON documents — lazy tree view, JSONPath query, and a syntax-highlighted text view, all in one modal. Designed to stay responsive on multi-megabyte payloads (parse runs through <code>simd-json</code> on the host).</p>
+
+<h3>Opening a document</h3>
+
+<p>From the Command Palette (<kbd>Ctrl+K</kbd>):</p>
+<ul>
+  <li><strong>Open JSON file in Studio…</strong> — file picker, scoped to common JSON extensions.</li>
+  <li><strong>Paste JSON in Studio…</strong> — small form with a textarea, useful for ad-hoc inspection of API responses copied from the browser.</li>
+</ul>
+
+<h3>Inside the modal</h3>
+
+<ul>
+  <li><strong>Tree view</strong> — every container is loaded lazily. Click a row's chevron to expand; clicking the row itself selects the node and shows its full value in the right-hand strip. Built on the same virtualised tree the file panel uses, so 100k+ keys still scroll smoothly.</li>
+  <li><strong>Text view</strong> — pretty-printed JSON, syntax-highlighted via Prism. Read-only; use the Copy button in the header to grab the formatted text.</li>
+  <li><strong>Query bar</strong> — full <a href="https://datatracker.ietf.org/doc/rfc9535/" target="_blank" rel="noopener">RFC 9535 JSONPath</a> via <code>serde_json_path</code>. Type and the modal queries on the fly; click a hit to jump to that node in the tree.
+    <ul>
+      <li><strong>Basics:</strong> <code>$</code>, <code>$.foo.bar</code>, <code>$.arr[0]</code>, <code>$.arr[*]</code>, <code>$..key</code></li>
+      <li><strong>Filters:</strong> <code>$.users[?@.age &gt; 30]</code>, <code>$.users[?@.role == "admin"]</code>, <code>$.books[?@.price &lt; 10 &amp;&amp; @.in_stock]</code></li>
+      <li><strong>Existence / negation:</strong> <code>$.users[?@.banned]</code>, <code>$.users[?!@.deleted]</code></li>
+      <li><strong>Slice:</strong> <code>$.arr[1:5]</code>, <code>$.arr[::-1]</code> (reverse)</li>
+      <li><strong>Multi-select:</strong> <code>$[0, 2, 4]</code>, <code>$["foo","bar"]</code></li>
+      <li><strong>Functions:</strong> <code>length(@)</code>, <code>count(@.tags[*])</code>, <code>match(@.email, ".*@.*")</code>, <code>search(@.text, "TODO")</code></li>
+      <li><strong>Combine:</strong> <code>$..book[?@.price &lt; 10].title</code> — recursive descent → filter → property</li>
+    </ul>
+
+    <p><strong>Common recipe — "find X anywhere where some descendant has Y == Z":</strong></p>
+    <pre><code>$..*[?@.Y == "Z"].X</code></pre>
+    <p>Example — given a survey where each question has a <code>controlType</code> and a <code>questionCode</code>, but nested at varying depths, get the codes of all printpdf questions:</p>
+    <pre><code>$..*[?@.controlType == "printpdf"].questionCode</code></pre>
+    <p>The <code>$..*</code> part is the key: <code>..</code> walks every descendant, <code>*</code> matches at every level. Just <code>$.foo[?...]</code> would only filter direct children of <code>foo</code>.</p>
+    <strong>Shorthands</strong> (typed as you'd think, rewritten before parsing):
+    <ul>
+      <li><code>foo</code> → <code>$..foo</code> (find <code>foo</code> anywhere)</li>
+      <li><code>.foo</code> / <code>[0]</code> → auto-prefix <code>$</code></li>
+      <li><code>users[?@.x]</code> → <code>$.users[?@.x]</code></li>
+    </ul>
+    Results are capped at 500 hits — refine the expression for narrower results.
+  </li>
+</ul>
+
+<h3>Plugin authors</h3>
+
+<p>The Lua API is intentionally minimal — one call:</p>
+
+<pre><code>arbor.json_studio.open{
+  text  = "{\"hello\":\"world\"}",  -- OR
+  path  = "/abs/path/to/data.json",
+  title = "scratch",                -- optional; defaults to filename or "JSON Studio"
+}</code></pre>
+
+<p>Pass either <code>text</code> or <code>path</code>. The modal opens immediately; parsing happens asynchronously on the host. Only one document is held at a time — opening a second one closes the first.</p>
+
+<h3>Roadmap</h3>
+
+<p>This plugin is the reference case for the planned WASM plugin runtime. Today the JSON parser lives in arbor's Rust core because pure-Lua parsing is too slow for multi-MB payloads; once WASM lands the parser will move into the plugin's own module and the host will lose all JSON-specific code. None of that affects the API above — <code>arbor.json_studio.open</code> stays the same.</p>

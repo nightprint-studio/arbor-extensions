@@ -1,0 +1,229 @@
+{
+  "_comment": "Importable source-export profile that exercises the new visual if/elif/else editor + free-form expression conditions. Three independent stages — OS dispatch, build-tool detection, numeric thresholds. auto_clone=false so the profile runs without a real source repo: every step uses builtins or shell echoes. Open Source Export, click Import on the profiles list, point at this file. Then run from the Pipelines panel.",
+
+  "arbor_plugin":         "source-export",
+  "arbor_plugin_version": "0.1.0",
+  "exported_at":          1700000000000,
+  "kind":                 "profile",
+
+  "profile": {
+    "id":          "cfg_ifelse_test_001",
+    "name":        "Test — If/Elif/Else playground",
+    "description": "Tre scenari indipendenti per il nuovo if_block visuale: dispatch su OS, detect build-tool, soglie numeriche. Le condizioni sono espressioni free-form (parser nel runtime Rust).",
+    "auto_clone":  false,
+    "branch_src":  "",
+    "branch_dest": "",
+    "remote_url":  "",
+    "log_level":   "debug",
+    "variables":   [],
+    "env":         [],
+    "created_at":  1700000000000,
+    "updated_at":  1700000000000,
+
+    "stages": [
+
+      {
+        "_comment_stage": "STAGE 1 — OS dispatch. Captures the active OS into ${target_os} via the env builtin (default = the runtime-detected platform), normalizes it, and routes to one of three branches with i_eq / OR. Set TEST_OS=mac in the run shell to flip the elif on demand.",
+        "id":           "stg_01_os_dispatch",
+        "name":         "1) OS dispatch",
+        "mode":         "sequential",
+        "max_parallel": null,
+        "steps": [
+          {
+            "id":            "stp_01_detect",
+            "name":          "Detect target OS",
+            "kind":          "builtin_env",
+            "allow_failure": false,
+            "params": {
+              "name":    "TEST_OS",
+              "default": "linux",
+              "var":     "target_os"
+            }
+          },
+          {
+            "id":            "stp_01_normalize",
+            "name":          "Normalize: lowercase + trim",
+            "kind":          "capture_var",
+            "allow_failure": false,
+            "params": {
+              "var":        "target_os",
+              "command":    "echo ${target_os}",
+              "source":     "stdout",
+              "transforms": [
+                { "kind": "trim" },
+                { "kind": "lower" }
+              ]
+            }
+          },
+          {
+            "id":            "stp_01_branch",
+            "name":          "Branch on ${target_os}",
+            "kind":          "if_block",
+            "allow_failure": false,
+            "params": {
+              "branches": [
+                {
+                  "expression": "${target_os} == \"windows\"",
+                  "steps": [
+                    { "id": "stp_01_win", "name": "Windows path",
+                      "kind": "shell_command", "allow_failure": false,
+                      "params": { "command": "echo Detected Windows host", "cwd": "" } }
+                  ]
+                },
+                {
+                  "expression": "${target_os} == \"macos\" || ${target_os} == \"darwin\"",
+                  "steps": [
+                    { "id": "stp_01_mac", "name": "macOS path",
+                      "kind": "shell_command", "allow_failure": false,
+                      "params": { "command": "echo Detected macOS host", "cwd": "" } }
+                  ]
+                }
+              ],
+              "else_steps": [
+                { "id": "stp_01_linux", "name": "Linux/other path",
+                  "kind": "shell_command", "allow_failure": false,
+                  "params": { "command": "echo Detected Linux or unknown host", "cwd": "" } }
+              ]
+            }
+          }
+        ]
+      },
+
+      {
+        "_comment_stage": "STAGE 2 — Build-tool detection. Three independent file_exists builtins capture booleans into ${has_pom}/${has_gradle}/${has_npm}. The if_block uses bare ${var} truthy expressions to prefer Maven > Gradle > npm with a final else fallback. Drop a pom.xml / build.gradle / package.json next to the runtime cwd to walk different branches.",
+        "id":           "stg_02_build_detect",
+        "name":         "2) Build-tool detect",
+        "mode":         "sequential",
+        "max_parallel": null,
+        "steps": [
+          {
+            "id":            "stp_02_pom",
+            "name":          "Detect pom.xml",
+            "kind":          "builtin_file_exists",
+            "allow_failure": false,
+            "params": { "path": "pom.xml", "var": "has_pom" }
+          },
+          {
+            "id":            "stp_02_gradle",
+            "name":          "Detect build.gradle",
+            "kind":          "builtin_file_exists",
+            "allow_failure": false,
+            "params": { "path": "build.gradle", "var": "has_gradle" }
+          },
+          {
+            "id":            "stp_02_npm",
+            "name":          "Detect package.json",
+            "kind":          "builtin_file_exists",
+            "allow_failure": false,
+            "params": { "path": "package.json", "var": "has_npm" }
+          },
+          {
+            "id":            "stp_02_pick",
+            "name":          "Pick the build tool",
+            "kind":          "if_block",
+            "allow_failure": true,
+            "params": {
+              "branches": [
+                {
+                  "expression": "${has_pom}",
+                  "steps": [
+                    { "id": "stp_02_mvn", "name": "Would run mvn",
+                      "kind": "shell_command", "allow_failure": false,
+                      "params": { "command": "echo would run: mvn -B package", "cwd": "" } }
+                  ]
+                },
+                {
+                  "expression": "${has_gradle}",
+                  "steps": [
+                    { "id": "stp_02_gw", "name": "Would run gradle",
+                      "kind": "shell_command", "allow_failure": false,
+                      "params": { "command": "echo would run: ./gradlew build", "cwd": "" } }
+                  ]
+                },
+                {
+                  "expression": "${has_npm}",
+                  "steps": [
+                    { "id": "stp_02_npm_run", "name": "Would run npm",
+                      "kind": "shell_command", "allow_failure": false,
+                      "params": { "command": "echo would run: npm ci && npm run build", "cwd": "" } }
+                  ]
+                }
+              ],
+              "else_steps": [
+                { "id": "stp_02_no_tool", "name": "No supported build tool found",
+                  "kind": "shell_command", "allow_failure": false,
+                  "params": { "command": "echo nessun pom/gradle/package.json — fallback", "cwd": "" } }
+              ]
+            }
+          }
+        ]
+      },
+
+      {
+        "_comment_stage": "STAGE 3 — Numeric thresholds + nested if_block + parens/AND/OR. Captures stdout from a shell command into a number via trim+to_number, then a single if_block routes on three numeric ranges using parens + && to demonstrate the expression parser. Edit the 'echo 12' to '0' or '3' to walk the other branches.",
+        "id":           "stg_03_thresholds",
+        "name":         "3) Numeric thresholds",
+        "mode":         "sequential",
+        "max_parallel": null,
+        "steps": [
+          {
+            "id":            "stp_03_count",
+            "name":          "Capture entry count",
+            "kind":          "capture_var",
+            "allow_failure": false,
+            "params": {
+              "var":        "entry_count",
+              "command":    "echo 12",
+              "source":     "stdout",
+              "transforms": [
+                { "kind": "trim" },
+                { "kind": "to_number" }
+              ]
+            }
+          },
+          {
+            "id":            "stp_03_dispatch",
+            "name":          "Threshold dispatch on ${entry_count}",
+            "kind":          "if_block",
+            "allow_failure": false,
+            "params": {
+              "branches": [
+                {
+                  "expression": "${entry_count} > 10",
+                  "steps": [
+                    { "id": "stp_03_many", "name": "Many entries (>10)",
+                      "kind": "shell_command", "allow_failure": false,
+                      "params": { "command": "echo path: many — heavyweight pipeline", "cwd": "" } },
+                    { "id": "stp_03_log_many", "name": "Echo branch label",
+                      "kind": "builtin_echo", "allow_failure": false,
+                      "params": { "message": "branch=many count=${entry_count}", "var": "last_branch" } }
+                  ]
+                },
+                {
+                  "expression": "(${entry_count} >= 1 && ${entry_count} <= 10)",
+                  "steps": [
+                    { "id": "stp_03_some", "name": "Some entries (1..10)",
+                      "kind": "shell_command", "allow_failure": false,
+                      "params": { "command": "echo path: some — light pipeline", "cwd": "" } },
+                    { "id": "stp_03_log_some", "name": "Echo branch label",
+                      "kind": "builtin_echo", "allow_failure": false,
+                      "params": { "message": "branch=some count=${entry_count}", "var": "last_branch" } }
+                  ]
+                }
+              ],
+              "else_steps": [
+                { "id": "stp_03_none", "name": "Zero / negative count",
+                  "kind": "shell_command", "allow_failure": false,
+                  "params": { "command": "echo path: none — nothing to do", "cwd": "" } },
+                { "id": "stp_03_log_none", "name": "Echo branch label",
+                  "kind": "builtin_echo", "allow_failure": false,
+                  "params": { "message": "branch=none count=${entry_count}", "var": "last_branch" } }
+              ]
+            }
+          }
+        ]
+      }
+
+    ]
+  }
+}

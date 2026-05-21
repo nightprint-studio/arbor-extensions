@@ -1,0 +1,20 @@
+name        = "json-studio"
+version     = "1.0.0"
+description = "IntelliJ-style JSON viewer: lazy tree, JSONPath query, syntax-highlighted text. Backed by simd-json on the host side; designed to migrate to a self-contained WASM plugin once the runtime lands."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["json", "viewer", "editor", "jsonpath"]
+arbor_api   = 1
+doc_file    = "doc.html"
+experimental = true
+
+[permissions]
+# `fs = "read"` is here for completeness — the picker + parsing are both
+# handled host-side, so the plugin doesn't actually call arbor.fs at runtime.
+# Keeping the permission declared makes the intent visible if the plugin
+# evolves to e.g. tail a log file in JSON Lines mode.
+fs = "read"
+
+[hooks]
+on_plugin_load = true

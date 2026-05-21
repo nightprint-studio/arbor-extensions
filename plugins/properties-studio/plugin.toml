@@ -1,0 +1,17 @@
+name        = "properties-studio"
+version     = "1.0.0"
+description = "IntelliJ-style .properties viewer + editor: lossless line view, dotted-key tree, JSONPath query, cross-refs (every key = target, every value = ref), schema panel. Backed by a custom line parser on the Rust host."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["properties", "java", "viewer", "editor"]
+arbor_api   = 1
+experimental = true
+
+[permissions]
+# `fs = "read"` is here for completeness — the picker + parsing are both
+# handled host-side, so the plugin doesn't actually call arbor.fs at runtime.
+fs = "read"
+
+[hooks]
+on_plugin_load = true

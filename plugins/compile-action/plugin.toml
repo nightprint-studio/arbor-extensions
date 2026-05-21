@@ -1,0 +1,31 @@
+name        = "compile-action"
+version     = "1.0.0"
+description = "Build runner: auto-detects project type and exposes build orchestration services."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "build"
+keywords    = ["build", "maven", "gradle", "cargo", "npm", "make"]
+icon        = "icon.svg"
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+fs        = "read"        # probes repo marker files for project-type detection
+fs_scope  = ["*"]         # the import flow reads JSON config files the user
+                          # picks from anywhere on disk (Browse… in the
+                          # import view); detection still only touches the
+                          # active repo
+terminal  = "any"         # spawns build jobs (maven, gradle, cargo, npm…)
+env_read  = true
+toolchain = "write"       # reads JDK list for JAVA_HOME injection + lets the settings UI add/remove/set active JDK
+# Exposes spawn_build / get_build_config / list_build_configs / is_building to
+# other plugins (run-action consumes these to orchestrate run-after-build).
+service_export = true
+# Calls run-action.stop_services on toolbar Stop so a single click cancels
+# both the build and any long-running run service in the active repo.
+service_call   = true
+
+[hooks]
+on_plugin_load = true
+on_repo_open   = true
+on_tab_switch  = true

@@ -1,0 +1,69 @@
+<h2>Release Notes</h2>
+<p>
+  Generates a Markdown release-notes file from a commit range. Does
+  <strong>not</strong> create a real release on GitHub or GitLab — it
+  only authors the document and lets you save it wherever you want
+  (or pipe it through a downstream release tool).
+</p>
+
+<h3>Wizard</h3>
+<p>
+  Opens from the Command Palette under
+  <strong>Generate release notes…</strong>. Two steps:
+</p>
+<ol>
+  <li><strong>Range</strong> — pick a <em>From</em> ref (default: latest
+      tag) and a <em>To</em> ref (default: <code>HEAD</code>). Both
+      dropdowns mix tags and local branches with a one-letter prefix so
+      they stay easy to scan. Toggle merge commits in or out.</li>
+  <li><strong>Format</strong> — title, grouping (Conventional Commits
+      type, author, or flat), optional Contributors section, and an
+      opt-in ticket enrichment pass.</li>
+</ol>
+<p>
+  After the wizard completes the plugin opens Arbor's native save
+  dialog, suggesting a filename derived from the upper bound
+  (<code>release-v1.2.0.md</code>, or a date stamp when targeting
+  HEAD).
+</p>
+
+<h3>Conventional Commits grouping</h3>
+<p>
+  When grouping by type, summaries are parsed against the
+  <code>type(scope)!: description</code> shape. Recognised types
+  appear in canonical order:
+  <em>Features → Bug Fixes → Performance → Refactoring → Documentation
+  → Styling → Tests → Build → CI → Chores → Reverts</em>. Anything
+  unrecognised lands in an <em>Other</em> bucket — nothing is dropped.
+  The optional scope is rendered as a bold prefix
+  (<code>**auth:** add OAuth login</code>).
+</p>
+
+<h3>Ticket enrichment</h3>
+<p>
+  When <strong>Enrich tickets with Linear / Jira data</strong> is on,
+  the plugin scans every commit message for ticket keys matching the
+  configured Lua pattern (default catches the
+  <code>ABC-123</code> shape used by Linear, Jira and Shortcut). For
+  each unique key it queries <code>arbor.issues.search</code> and
+  appends a sub-bullet with the ticket title, state and link. Lookup
+  failures are silent — enrichment is decoration, not load-bearing.
+</p>
+
+<h3>Output shape</h3>
+<pre><code># Release notes — v1.0.0 → HEAD
+
+**42 commits** between `v1.0.0` and `HEAD`
+
+## Features
+- **auth:** add OAuth login — `a1b2c3d`
+  - [PROJ-42](https://…) — Sign in with GitHub _(In Review)_
+- …
+
+## Bug Fixes
+- **graph:** stop flickering on resize — `9f8e7d6`
+
+## Contributors
+- Alice
+- Bob
+</code></pre>

@@ -1,0 +1,57 @@
+<h2>Run Monitor</h2>
+
+<p>
+  A dedicated bottom panel for running application services. Adds a
+  <strong>Server</strong> icon to the right ActivityBar (bottom group); clicking it
+  opens a panel listing every job in the <code>Services</code> category with its
+  current status, elapsed time, and per-row actions.
+</p>
+
+<h3>Behaviour</h3>
+<ul>
+  <li>Click a service card → opens the streaming <em>Job Output</em> panel
+      focused on that job.</li>
+  <li>Per-row <em>Stop</em> button cancels the underlying process.</li>
+  <li>The list refreshes every 1.5 s plus on every panel open.</li>
+</ul>
+
+<h3>Interaction with run-action</h3>
+<p>
+  At load time this plugin calls <code>run-action.set_hide_services</code> with
+  <code>value = true</code>. From then on, every <code>Services</code>-category
+  job that <em>run-action</em> spawns enters the registry as
+  <code>hidden = true</code>, so the global Jobs overlay and the status-bar
+  job badge skip them. They remain visible <em>here</em>, plus under the
+  "Show hidden" toggle on the Jobs overlay as an escape hatch.
+</p>
+<p>
+  run-action also consults <code>arbor.meta.plugin_loaded("run-monitor")</code>
+  at every spawn site as a synchronous fallback, so even if the async
+  <code>set_hide_services</code> call hasn't landed yet (startup race,
+  run-action reloaded mid-session, host mutex contention), service jobs are
+  still spawned hidden whenever this plugin is enabled.
+</p>
+<p>
+  Disabling or unloading <em>run-monitor</em> automatically restores the
+  default behaviour: the unload hook calls
+  <code>set_hide_services(false)</code>, and run-action's subsequent service
+  jobs go back into the global overlay.
+</p>
+
+<h3>Permissions</h3>
+<ul>
+  <li><code>service_call = true</code> — to call
+      <code>run-action.set_hide_services</code>.</li>
+</ul>
+
+<h3>Notes</h3>
+<ul>
+  <li>This panel monitors <em>any</em> plugin's <code>Services</code> jobs,
+      not only run-action's. The hide flag, however, is run-action specific:
+      other plugins continue to surface their service jobs in the global
+      overlay unless they implement an equivalent hand-off.</li>
+  <li>There is no UI in run-action's settings to flip
+      <code>hide_services</code> manually — the only way to toggle it is to
+      enable / disable this plugin (or another plugin that calls the same
+      service).</li>
+</ul>

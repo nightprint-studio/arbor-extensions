@@ -1,0 +1,20 @@
+name        = "gitignore-suggester"
+version     = "1.0.0"
+description = "Detects common build outputs / IDE files among untracked items and proposes .gitignore entries."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "git-workflow"
+keywords    = ["gitignore", "productivity", "untracked"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+# git = "read"   → arbor.repo.untracked() needs at least read access.
+# fs  = "write"  → we append to .gitignore inside the active repo's sandbox.
+git = "read"
+fs  = "write"
+
+[hooks]
+on_plugin_load = true
+on_repo_open   = true
+on_tab_switch  = true

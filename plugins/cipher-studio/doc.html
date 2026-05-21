@@ -1,0 +1,88 @@
+<h2>Cipher Studio</h2>
+<p>
+  Encode and decode text with classical ciphers and old-school encodings.
+  No AES / GCM / PGP — this plugin is for ROT13-era fun, CTF warmups and
+  quick decoding of suspicious-looking strings.
+</p>
+
+<h3>How to use</h3>
+<ol>
+  <li>Open the Command Palette and run <b>Cipher Studio: open…</b>.</li>
+  <li>Pick an algorithm from the dropdown (grouped by family).</li>
+  <li>Type a key in the <i>Key / parameter</i> box if the algorithm needs one
+      — the hint below the algorithm name tells you whether a key is required
+      and what shape it takes.</li>
+  <li>Paste your text in the <b>Input</b> area, hit <b>Encode</b> or <b>Decode</b>,
+      result lands in <b>Output</b>.</li>
+  <li><b>Swap</b> moves Output back to Input; <b>Use output as input</b> chains
+      multiple algorithms (e.g. Base64 → ROT13 → Hex).</li>
+</ol>
+
+<h3>Algorithm catalog</h3>
+
+<h4>Encoding (reversible, no key)</h4>
+<ul>
+  <li><b>Base64</b> — standard RFC 4648.</li>
+  <li><b>Base32</b> — RFC 4648 alphabet.</li>
+  <li><b>Base16 / Hex</b> — uppercase hex.</li>
+  <li><b>Binary</b> — 8-bit groups separated by spaces.</li>
+  <li><b>Octal</b> — 3-digit groups separated by spaces.</li>
+  <li><b>Decimal ASCII</b> — space-separated code points.</li>
+  <li><b>URL</b> — percent-encoding.</li>
+  <li><b>HTML entities</b> — <code>&amp;#NN;</code> form.</li>
+  <li><b>Unicode escape</b> — <code>\uXXXX</code> form.</li>
+  <li><b>Morse</b> — letters / digits / common punctuation; <code>/</code> = word separator.</li>
+  <li><b>A1Z26</b> — A=1, B=2, … Z=26.</li>
+  <li><b>Reverse</b> — string reversed character-wise.</li>
+</ul>
+
+<h4>Substitution ciphers</h4>
+<ul>
+  <li><b>ROT13</b> — Caesar with shift 13. Encode == Decode.</li>
+  <li><b>ROT47</b> — like ROT13 but across all printable ASCII (33–126).</li>
+  <li><b>ROT5</b> — only digits, shift 5.</li>
+  <li><b>ROT18</b> — ROT13 on letters + ROT5 on digits.</li>
+  <li><b>Caesar</b> — generic Caesar; key = shift (integer, default 3).</li>
+  <li><b>Atbash</b> — A↔Z, B↔Y, … self-inverse.</li>
+  <li><b>Affine</b> — <code>E(x) = a·x + b mod 26</code>; key = <code>a,b</code> (a coprime with 26).</li>
+  <li><b>Vigenère</b> — repeating-keyword Caesar; key = word.</li>
+  <li><b>Beaufort</b> — Vigenère variant <code>E(x) = k − x mod 26</code>; self-inverse.</li>
+  <li><b>Autokey</b> — Vigenère where the plaintext extends the key.</li>
+</ul>
+
+<h4>Steganographic</h4>
+<ul>
+  <li><b>Bacon</b> — each letter → 5-bit A/B group. 26-letter variant.</li>
+</ul>
+
+<h4>Transposition</h4>
+<ul>
+  <li><b>Rail fence</b> — zig-zag over N rails; key = rails (integer ≥ 2).</li>
+  <li><b>Columnar</b> — write plaintext in rows under a keyword, read columns
+      in keyword-letter order; key = keyword.</li>
+  <li><b>Scytale</b> — wrap text around a rod of given diameter; key = rod size.</li>
+</ul>
+
+<h4>Grids</h4>
+<ul>
+  <li><b>Polybius</b> — 5×5 letter grid (I/J merged); pairs of digits.</li>
+  <li><b>Nihilist</b> — Polybius coordinates + Vigenère-style numeric sum; key = word.</li>
+</ul>
+
+<h4>Bonus</h4>
+<ul>
+  <li><b>Playfair</b> — 5×5 keyed grid on digrams; key = keyword.</li>
+  <li><b>Bifid</b> — Polybius + transposition of coordinates.</li>
+  <li><b>XOR</b> — bytewise XOR with repeating key; output as hex.</li>
+</ul>
+
+<h3>Notes</h3>
+<ul>
+  <li>All algorithms are pure-Lua — no Rust dependencies were added to the
+      Arbor host. Each lives in <code>plugins/cipher-studio/algos/&lt;id&gt;.lua</code>
+      and can be hacked / extended without touching the runtime.</li>
+  <li>Classical ciphers preserve only letters; punctuation and whitespace pass
+      through unchanged (with the exceptions noted above).</li>
+  <li><b>Do not use these for actual security</b>. They're all broken — that's
+      the point.</li>
+</ul>

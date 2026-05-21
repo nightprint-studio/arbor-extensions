@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Source Export</title>
+</head>
+<body>
+  <h1>Source Export</h1>
+  <p>
+    <strong>Source Export</strong> is a workflow engine for exporting source
+    code to external repositories. You define reusable <em>profiles</em>
+    (per-repo) with declarative stages and steps that clone, transform,
+    validate, commit and push the codebase to a customer's remote — all
+    visible, resumable and auditable.
+  </p>
+
+  <h2>Capabilities</h2>
+  <ul>
+    <li>Per-repo profile CRUD with full editor UI (Info / Regole / Cronologia tabs).</li>
+    <li>A catalog of ~45 step operations grouped by category with a searchable palette.</li>
+    <li>ActivityBar split-button with the profile selector and primary Run action.</li>
+    <li>Plugin-global settings (output folder, run retention, external <code>ju</code> tool path, template library).</li>
+    <li>JSON import/export of profiles and save-as-template.</li>
+    <li>Integration with Arbor's extended pipeline runtime: concurrency lock per
+      profile, resume-from-failed-step, parallel jobs inside a stage, structured
+      logging with per-run <code>log_level</code>, persistence across restarts.</li>
+    <li>Run history per profile with Resume / Discard / Open log actions, auto-trimmed
+      by the global <code>keep_last_n_runs</code> policy.</li>
+  </ul>
+  <h2>Implementation status</h2>
+  <p>
+    Phase 2 delivers the end-to-end flow — profiles compile into live
+    <code>arbor.pipeline</code> runs. The initial operation set covers the
+    primary "export source to customer repo" scenario:
+  </p>
+  <ul>
+    <li><strong>File</strong>: delete_pattern · delete_file · copy_file · move_file ·
+      create_file · touch_file · append_file · prepend_file</li>
+    <li><strong>Content</strong>: replace_in_file · replace_on_glob</li>
+    <li><strong>Git</strong>: init · clone · commit · tag · push · checkout ·
+      cherry-pick · merge · submodule update</li>
+    <li><strong>Build</strong>: Offline M2 (via external <code>ju</code>)</li>
+    <li><strong>Validation</strong>: assert_file_exists · assert_cmd_exit_zero ·
+      assert_env_set · assert_branch_clean</li>
+    <li><strong>Flow</strong>: log_message · notify_toast · shell_command</li>
+  </ul>
+  <p>
+    The remaining ops (chmod, normalize_eol, strip_bom, JSON/YAML/TOML/XML edit,
+    properties_edit, env_merge, strip_comments, template_render, insert_at_anchor,
+    maven/gradle/npm commands, advanced asserts, docker_build/push, lua_inline,
+    set_variable, try_on_error) are declared in the palette but return
+    <em>"not implemented"</em> at run time. Running a profile that contains one of
+    them fails fast with a precise error listing the offending steps — add your
+    own via <code>shell_command</code> until they ship.
+  </p>
+
+  <h2>How profiles are stored</h2>
+  <ul>
+    <li><strong>Per-repo profiles</strong>: <code>&lt;repo&gt;/.arbor/plugins/source-export/settings.json</code>.</li>
+    <li><strong>Plugin-global settings &amp; templates</strong>: <code>~/.config/arbor/plugins/source-export/settings.json</code>.</li>
+    <li><strong>Runs</strong>: persisted by Arbor's pipeline runtime under <code>~/.config/arbor/pipeline_runs/&lt;run_id&gt;.json</code>.</li>
+  </ul>
+
+  <h2>Concurrency model</h2>
+  <p>
+    Each profile uses a lock key <code>&lt;plugin&gt;:&lt;id&gt;</code>. Only
+    one run per profile can be in state <code>running</code> at a time;
+    <code>failed</code>/<code>success</code>/<code>cancelled</code> runs
+    release the lock immediately. A failed run remains <em>resumable</em>: its
+    state is persisted to disk and you can resume it with the Resume action in
+    the Cronologia tab. If a newer run has been started in the meantime, the
+    resume waits until the lock is free again.
+  </p>
+
+  <h2>Variables &amp; placeholders</h2>
+  <p>
+    Every step can reference built-in variables (always available) or user
+    variables declared in the profile's Info tab.
+  </p>
+  <table>
+    <thead><tr><th>Variable</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>$SOURCE_PATH</code></td><td>Active Arbor repo (or the CLI-supplied cwd)</td></tr>
+      <tr><td><code>$OUTPUT_PATH</code></td><td><code>&lt;settings.output_folder&gt;/&lt;profile&gt;_&lt;timestamp&gt;</code></td></tr>
+      <tr><td><code>$BRANCH_SRC</code></td><td>Source branch of the profile (or the active branch)</td></tr>
+      <tr><td><code>$BRANCH_DEST</code></td><td>Destination branch (optional; empty when unset)</td></tr>
+      <tr><td><code>$PROFILE</code></td><td>Profile name</td></tr>
+      <tr><td><code>$RUN_ID</code></td><td>Current run id</td></tr>
+      <tr><td><code>$TIMESTAMP</code></td><td>Unix seconds at run start</td></tr>
+      <tr><td><code>$COMMIT_SHA</code></td><td>Head SHA of the source repo at run start</td></tr>
+      <tr><td><code>$REPO_NAME</code></td><td>Tail folder name of the source repo</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Operation catalog</h2>
+  <p>
+    The palette groups ~45 steps across FILE, CONTENUTO, GIT, BUILD/DEP,
+    VALIDATION, EXECUTION and FLOW categories. A search box filters in real
+    time. See the Regole export tab for the live list in your build.
+  </p>
+
+  <h2>Variable expansion</h2>
+  <p>
+    Every string field in every step parameter goes through the expander.
+    The resolver covers built-ins, profile vars, sequence globals, per-item
+    overrides, and any <code>set_variable</code> rebind — all in one
+    namespace (built-ins always win on name collision).
+  </p>
+  <table>
+    <thead><tr><th>Form</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>$NAME</code></td><td>Greedy match <code>[A-Za-z0-9_]</code>. Unresolved → left literal for debuggability.</td></tr>
+      <tr><td><code>${NAME}</code></td><td>Explicit brace form — required when NAME is followed by letters/underscore.</td></tr>
+      <tr><td><code>${NAME:default}</code></td><td>Fallback when NAME is unset <em>or</em> empty (bash <code>:-</code> semantics). Default runs verbatim to the next <code>}</code>; splitting uses only the first <code>:</code> so URLs/paths with colons in the default are fine.</td></tr>
+      <tr><td><code>${NAME:}</code></td><td>Empty default — forces empty string when NAME is unset.</td></tr>
+      <tr><td><code>${env:NAME}</code></td><td>System env var lookup (<code>os.getenv</code>). Useful to reference user-level paths like <code>${env:JAVA_HOME_11}</code> without baking them into the saved profile.</td></tr>
+      <tr><td><code>${env:NAME:default}</code></td><td>Same with fallback when the system env var is unset or empty.</td></tr>
+      <tr><td><code>$$</code></td><td>Literal <code>$</code> escape.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Environment overrides</h2>
+  <p>
+    The <strong>Environment</strong> section in the Info tab holds a list of
+    process env vars applied to every shell <code>command</code> step in the
+    profile. Auto-clone steps are excluded so a typo in <code>PATH</code>
+    can't break the initial git clone. Values support the full expansion
+    syntax above — combine <code>${env:JAVA_HOME_11}</code> with profile
+    variables to pin a Java toolchain without hard-coding host paths.
+  </p>
+  <pre><code>JAVA_HOME = ${env:JAVA_HOME_11}
+PATH      = ${env:JAVA_HOME_11}\bin;${env:PATH}</code></pre>
+  <p>
+    The expander is applied to <code>profile.branch_src</code> too — so you
+    can write <code>${RELEASE_BRANCH:main}</code> and have the auto-clone
+    stage pick the right branch at run time based on sequence variables.
+  </p>
+
+  <h2>Sequences (cross-repo meta-runs)</h2>
+  <p>
+    A <strong>Sequence</strong> is an ordered list of profile runs — possibly
+    across different repositories — that share a single output folder and a
+    matrix of variable overrides. Use it when a nightly build has to export
+    several projects in a specific order, or when the same profile needs to
+    run with several variable combinations.
+  </p>
+  <p>
+    Sequences live <strong>exclusively in the right-side ActivityBar</strong>
+    under the <em>Workflow</em> icon. Clean separation: the RepoActions combo
+    is per-repo (profiles), the right sidebar is cross-repo (sequences).
+  </p>
+
+  <h3>The sidebar</h3>
+  <p>
+    One compact card per sequence with title + item count + inline ghost
+    icon toolbar (Run / Edit / Duplicate / Delete). The footer has
+    <em>+ New sequence</em> and <em>History…</em> — the latter opens a
+    full-width modal with every run across all sequences.
+  </p>
+
+  <h3>The editor (3-column Items tab)</h3>
+  <ul>
+    <li><strong>Info tab</strong> — name, description, fail-fast toggle,
+      output root override, and sequence-level <em>Global variables</em>.</li>
+    <li><strong>Items tab</strong>:
+      <ul>
+        <li><em>Palette</em> (left): collapsible card per known repo with
+          ≥1 profile. Each profile is a click-to-add row.</li>
+        <li><em>Sequence items</em> (middle): ordered tree of picked items;
+          click to focus.</li>
+        <li><em>Detail</em> (right): move up / down / remove toolbar, a
+          <em>Profile</em> card with click-to-copy repo path, a <em>Runtime</em>
+          card (enabled / allow-failure), and <em>Variable overrides for
+          this item</em> — the per-item kv_list that layers on top of the
+          sequence globals.</li>
+      </ul>
+    </li>
+    <li><strong>History tab</strong> — this sequence's runs only, newest
+      first.</li>
+  </ul>
+  <p>
+    Known repos are discovered via the workspace registry; profile lists
+    are read from each repo's
+    <code>.arbor/plugins/source-export/project.json</code> on demand. No
+    need to open a repo as a tab before you can add its profiles.
+  </p>
+
+  <h3>Matrix variables</h3>
+  <p>Merge order, last writer wins:</p>
+  <ol>
+    <li>Profile's own <code>variables</code> (tab Info of the profile)</li>
+    <li>Sequence's <code>Global variables</code></li>
+    <li>Per-item <code>Variable overrides for this item</code></li>
+  </ol>
+  <p>
+    Use <code>${NAME:default}</code> for optional values — makes it easy to
+    express "override in some items, fall back in the rest".
+  </p>
+
+  <h3>Output folder</h3>
+  <p>
+    Every item in a sequence writes its output under
+    <code>&lt;output_root&gt;/NN_profile/…</code>. Leave <code>output_root</code>
+    empty and the runtime auto-creates
+    <code>&lt;plugin.output_folder&gt;/sequence_&lt;name&gt;_&lt;ts&gt;</code>.
+    This override wins over the profile's own output logic only for the
+    duration of the sequence run — the profile itself stays untouched.
+  </p>
+
+  <h3>Fail-fast</h3>
+  <p>
+    Off by default. With fail-fast OFF, every enabled item runs regardless
+    of the outcome of the ones before, and the run status is
+    <code>success</code>, <code>partial</code>, or <code>failed</code>
+    depending on the mix. With fail-fast ON, the first failure halts the
+    run and the rest are marked <code>skipped</code>.
+  </p>
+
+  <h3>Running a sequence</h3>
+  <p>
+    Click <strong>Run</strong> on a sequence card in the sidebar (or the
+    Play icon in the editor's tree toolbar). The History modal opens
+    automatically so you can watch per-item progress with colored status
+    glyphs. Each item row is a clickable ghost button with an
+    <code>ExternalLink</code> glyph — click to deep-link to that specific
+    pipeline run's detail modal (graph + streaming output).
+  </p>
+  <p>
+    The output folder for each run appears inline — click the path to copy
+    to clipboard, or the trailing <code>FolderOpen</code> icon to reveal
+    it in the OS file manager.
+  </p>
+
+  <h3>Persistence</h3>
+  <p>
+    Sequences are GLOBAL (stored in
+    <code>~/.config/arbor/plugin_data/source-export/global.json</code>) —
+    they fan out across workspaces. Per-profile data stays per-repo.
+    Sequence runs are capped at the last 50 entries and persist across
+    restarts; orphaned "running" runs left by a crash are swept to
+    <code>failed</code> at plugin load.
+  </p>
+</body>
+</html>

@@ -1,0 +1,46 @@
+name        = "run-action"
+version     = "1.0.0"
+description = "Application runner — builds via compile-action, then launches the selected run configuration."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "build"
+keywords    = ["run", "launcher", "tomcat", "spring", "logs"]
+icon        = "icon.svg"
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+fs       = "write"   # needed to locate/deploy WARs and inspect project markers
+fs_scope = ["*"]     # WAR deploys land outside the active repo (Tomcat install dir, etc.)
+terminal = "any"     # spawns the run command (and detects package manager)
+env_read = true
+# Reads active JDK / Node / Rust toolchains via arbor.toolchain.{active,env,list}
+# inside resolve_run_env — needed by every run path (Spring, Tomcat, Cargo, Node).
+toolchain = "read"
+# run-action calls compile-action.spawn_build / list_build_configs / get_java_home
+service_call   = true
+# run-action exports `stop_services` for compile-action's Stop button to call.
+# Without this the on_plugin_load handler crashes at `arbor.service.export(...)`
+# and the cross-plugin stop path silently no-ops (was the root cause of the
+# "Stop button unreliable" issue noted in compile-action/ui/sidebar.lua).
+service_export = true
+# Reads compile-action's `active_profile` project setting synchronously so
+# `resolve_run_env` can layer the per-profile env overrides without a round
+# trip through arbor.service.call (which is async).
+settings_read_others = true
+
+# run-action contributes its global-settings section to compile-action's
+# settings panel via `arbor.ui.contribute("compile-action:settings:section",
+# …)` at PLUGIN_LOAD.
+
+[hooks]
+on_plugin_load          = true
+on_repo_open            = true
+on_tab_switch           = true
+on_pipeline_done        = true   # catalina is spawned after the Tomcat deploy pipeline
+on_pipeline_run_request = true   # Pipelines panel Play button → re-resolve build + redeploy
+
+# run-action needs compile-action to orchestrate the build-before-run flow.
+[[dependencies]]
+name    = "compile-action"
+version = ">=1.0.0"

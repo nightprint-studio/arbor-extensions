@@ -1,0 +1,25 @@
+name        = "release-notes"
+version     = "1.0.0"
+description = "Generates Markdown release notes between two refs, with Conventional Commits grouping and optional Linear/Jira enrichment."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "git-workflow"
+keywords    = ["changelog", "release", "conventional-commits", "markdown"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+# git      = "read"  → arbor.repo.commits / branches / tags / current
+# fs       = "write" → arbor.fs.write to save the .md file the user picked
+# fs_scope = ["*"]   → user picks the destination via the OS save dialog;
+#                     anywhere on disk is fair game (the act of picking IS
+#                     consent — the fs sandbox would otherwise reject any
+#                     path outside the active repo, e.g. ~/Downloads/foo.md)
+# issues   = "read"  → arbor.issues.search for the optional enrichment step
+git      = "read"
+fs       = "write"
+fs_scope = ["*"]
+issues   = "read"
+
+[hooks]
+on_plugin_load = true

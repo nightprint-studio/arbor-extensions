@@ -1,0 +1,77 @@
+<h1>RON Studio</h1>
+
+<p>
+  IntelliJ-style viewer and editor for <a href="https://github.com/ron-rs/ron" target="_blank" rel="noopener">Rusty Object Notation</a> documents. Designed for the things <code>cat</code> and a plain editor can't easily do: walk the structural tree, validate against a Rust schema you load from your own crate, diff against the original on disk, save in place or fork via Save&nbsp;As, and convert to&nbsp;/&nbsp;from JSON.
+</p>
+
+<h2>How to open a document</h2>
+<ul>
+  <li><strong>Open RON file in Studio…</strong> — pick a <code>.ron</code> file from disk.</li>
+  <li><strong>Paste RON in Studio…</strong> — paste any RON text into a textarea.</li>
+</ul>
+<p>Both commands appear in the Command Palette (<kbd>Ctrl</kbd>+<kbd>K</kbd>) under the &ldquo;RON Studio&rdquo; group.</p>
+
+<h2>The modal</h2>
+<p>Four views over the same parsed document, switched via the toolbar:</p>
+<ul>
+  <li><strong>Tree</strong> — structural navigation with type badges (<code>Struct</code>, <code>Map</code>, <code>List</code>, <code>Option</code>, <code>Char</code>, primitives). Lazy: only expanded nodes are pulled over IPC. Click a node to inspect its value.</li>
+  <li><strong>Text</strong> — primary edit surface. A plain editable text view with RON-aware syntax highlighting. Comments and exact formatting are preserved on save.</li>
+  <li><strong>Diff</strong> — side-by-side comparison of the original loaded text against the current edit state. Use <kbd>F3</kbd> / <kbd>Shift+F3</kbd> or the prev/next chevrons in the toolbar to jump between chunks, just like the stage panel's diff.</li>
+  <li><strong>Errors</strong> — when parsing fails, this view shows the location and message reported by the <code>ron</code> parser.</li>
+</ul>
+
+<h2>Editing model</h2>
+<p>
+  The Text view is the source of truth. Every keystroke triggers a debounced re-parse; the tree updates live. The Save and Save&nbsp;As actions write exactly what's in the textarea, so anything you typed — comments included — is preserved verbatim.
+</p>
+<p>
+  <strong>Format</strong> and <strong>RON&nbsp;↔&nbsp;JSON</strong> normalise the text through the parser and serialiser. They warn before running because the round-trip drops comments and any custom formatting. They never touch the file on disk until you click Save.
+</p>
+
+<h2>Save / Save As</h2>
+<p>
+  The Save button in the header writes the current Text view content back to the file that was opened. The dropdown next to it (<strong>▾</strong>) exposes Save&nbsp;As — pick a new path; the document then tracks the new location so subsequent Save clicks write there.
+</p>
+<p>
+  When the document was opened via <em>Paste</em>, Save is disabled (there's no source path); use Save&nbsp;As to commit the buffer to disk.
+</p>
+
+<h2>Schema loaded from Rust sources</h2>
+<p>
+  The schema panel lets you pick any <code>.rs</code> file from your project. RON Studio walks up to the enclosing <code>Cargo.toml</code> and then descends through every <code>mod</code> declaration from <code>lib.rs</code>/<code>main.rs</code> to index every <code>struct</code>, <code>enum</code> and <code>type</code> alias in the crate.
+</p>
+<p>
+  You then choose a <strong>root type</strong> from the dropdown (populated with the public/private types defined in the file you picked). The closure of types reachable from that root is computed and used to:
+</p>
+<ul>
+  <li>Annotate tree rows with real Rust types (you'll see <code>u16</code>, <code>Option&lt;Vec&lt;Server&gt;&gt;</code>, etc., not just &ldquo;Number&rdquo;).</li>
+  <li>Highlight unknown fields and variants the RON file uses but the schema doesn't define.</li>
+  <li>List schema fields that the document is missing (and whether they have <code>#[serde(default)]</code>).</li>
+</ul>
+
+<h3>What works (best-effort)</h3>
+<ul>
+  <li>Cross-file resolution through <code>mod</code> declarations, including <code>#[path = "..."]</code>.</li>
+  <li><code>use</code> aliases (including <code>as</code> renames) and <code>pub use</code> re-exports.</li>
+  <li>Standard generics: <code>Option&lt;T&gt;</code>, <code>Vec&lt;T&gt;</code>, <code>HashMap&lt;K, V&gt;</code>, <code>BTreeMap</code>, tuples, fixed-size arrays.</li>
+  <li>Transparent wrappers: <code>Box</code>, <code>Rc</code>, <code>Arc</code>, <code>Cell</code>, <code>RefCell</code>, <code>Mutex</code>, <code>RwLock</code>.</li>
+  <li>Common <code>#[serde(...)]</code> attributes: <code>rename</code>, <code>default</code>, <code>skip_serializing_if</code>, <code>flatten</code>.</li>
+</ul>
+
+<h3>Honest limits</h3>
+<ul>
+  <li>Types from other crates surface as <code>External(path)</code> — the rest of the schema still works; that single branch just isn't validated.</li>
+  <li>Macro-generated types are invisible to the parser; they appear as <code>Unknown</code>.</li>
+  <li><code>#[cfg(...)]</code> is ignored: everything is indexed regardless of features.</li>
+  <li>Generics that aren't instantiated at the root (<code>Foo&lt;T&gt;</code> with a free parameter) are reported as unresolved — pick a concrete root type.</li>
+</ul>
+
+<h2>Lua API</h2>
+<pre><code>arbor.ron_studio.open{ path = "/abs/path/to/config.ron" }
+arbor.ron_studio.open{ text = '(name: "x", port: 8080)', title = "scratch" }</code></pre>
+<p>That's the entire surface. Everything else is driven from the modal.</p>
+
+<h2>Earmarks</h2>
+<p>
+  Like the JSON Studio and cloud-storage plugins, RON Studio relies on Rust crates pulled into the Arbor host: <code>ron</code> for parsing/serialising and <code>syn</code> for walking Rust sources. The team's direction is to migrate these heavy plugins to a subprocess-based runtime so the host stops accreting dependencies — when that lands, this plugin moves out as a self-contained binary.
+</p>

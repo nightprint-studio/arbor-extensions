@@ -1,0 +1,19 @@
+name        = "ron-studio"
+version     = "1.0.0"
+description = "IntelliJ-style RON viewer: tree, syntax-highlighted text, diff, schema cross-crate from .rs sources. Backed by the `ron` crate and `syn` (host-side) until a subprocess-based plugin runtime lands."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["ron", "rust", "viewer", "editor", "schema"]
+arbor_api   = 1
+doc_file    = "doc.html"
+experimental = true
+
+[permissions]
+# Same shape as json-studio: parsing + I/O happen host-side via the Tauri
+# command set. The permission is declared for clarity in case the plugin
+# evolves to e.g. import RON snippets from arbitrary paths via arbor.fs.
+fs = "read"
+
+[hooks]
+on_plugin_load = true

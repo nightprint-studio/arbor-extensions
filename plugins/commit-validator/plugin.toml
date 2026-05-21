@@ -1,0 +1,19 @@
+name        = "commit-validator"
+version     = "1.0.0"
+description = "Validates commit messages against Conventional Commits specification."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "git-workflow"
+keywords    = ["lint", "conventional-commits", "hooks", "pre-commit"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+git = "read"
+
+# Settings UI pending migration to `arbor.ui.settings.panel(...)`.
+
+[hooks]
+on_plugin_load = true
+on_pre_commit  = true
+on_commit      = true

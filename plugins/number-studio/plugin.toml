@@ -1,0 +1,15 @@
+name        = "number-studio"
+version     = "1.0.0"
+description = "Convert integers between numeral systems: bases (binary, hex, base-36, sexagesimal…), historical scripts (Roman, Greek, Egyptian, Babylonian, Mayan, Hebrew) and non-Latin digits (Arabic-Indic, Devanagari, Chinese, Thai…). One Lua file per system — no Rust deps."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["numerals", "conversion", "base", "binary", "hex", "roman"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+# No host capabilities needed — everything is pure Lua.
+[permissions]
+
+[hooks]
+on_plugin_load = true

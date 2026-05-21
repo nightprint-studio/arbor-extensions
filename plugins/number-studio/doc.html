@@ -1,0 +1,128 @@
+<h2>Number Studio</h2>
+<p>
+  Convert integers between numeral systems — positional bases, classical
+  numerals (Roman, Greek, Egyptian, Babylonian, Mayan, Hebrew) and
+  non-Latin digit scripts (Arabic-Indic, Devanagari, Chinese, Thai, …).
+  No Rust dependencies — every system lives in its own Lua file under
+  <code>plugins/number-studio/algos/&lt;id&gt;.lua</code>.
+</p>
+
+<h3>How to use</h3>
+<ol>
+  <li>Open the Command Palette and run <b>Number Studio: open…</b>.</li>
+  <li>Pick a system from the dropdown (grouped by family).</li>
+  <li>Paste one integer per line in <b>Input</b>.</li>
+  <li>Hit <b>To system</b> to convert decimals → that system, or
+      <b>To decimal</b> to parse them back. Errors on a single line are
+      emitted inline as <code>⚠ &lt;reason&gt;</code> so a partially-bad
+      batch still produces useful output.</li>
+  <li><b>Swap</b> exchanges input/output, <b>Use output as input</b>
+      chains conversions (e.g. decimal → Roman → decimal).</li>
+</ol>
+
+<h3>System catalog</h3>
+
+<h4>Numeric bases</h4>
+<ul>
+  <li><b>Binary</b> (base 2)</li>
+  <li><b>Ternary</b> (base 3)</li>
+  <li><b>Quaternary</b> (base 4)</li>
+  <li><b>Senary</b> (base 6)</li>
+  <li><b>Octal</b> (base 8)</li>
+  <li><b>Duodecimal</b> (base 12) — digits 0-9, A, B</li>
+  <li><b>Hexadecimal</b> (base 16) — digits 0-9, A-F</li>
+  <li><b>Vigesimal</b> (base 20) — digits 0-9, A-J</li>
+  <li><b>Base32 (positional)</b> — not the RFC encoding, just radix-32</li>
+  <li><b>Base36</b> — digits 0-9, A-Z</li>
+  <li><b>Sexagesimal</b> (base 60) — comma-separated digits, e.g.
+      <code>3661 → 1,1,1</code></li>
+  <li><b>Custom base</b> — pick any radix 2-36 via the <i>Key</i> field</li>
+</ul>
+
+<h4>Historical numerals</h4>
+<ul>
+  <li><b>Roman</b> — standard subtractive notation, 1-3999. Decoding
+      validates that the input matches the canonical form
+      (so <code>IIII</code> is rejected, expects <code>IV</code>).</li>
+  <li><b>Greek alphabetic (Milesian)</b> — α=1 … θ=9, ι=10 … ϟ=90,
+      ρ=100 … ϡ=900; lower keraia <code>͵</code> for thousands;
+      keraia <code>ʹ</code> marks the numeral. Range 1-999 999.</li>
+  <li><b>Attic Greek (acrophonic)</b> — Ι=1, Π=5, Δ=10, 𐅄=50, Η=100,
+      𐅅=500, Χ=1000, 𐅆=5000, Μ=10 000, 𐅇=50 000. Additive.</li>
+  <li><b>Egyptian hieroglyphic</b> — 𓏺=1 𓎆=10 𓍢=100 𓆼=1000 𓂭=10⁴
+      𓆐=10⁵ 𓁨=10⁶. Additive, 1-9 999 999.</li>
+  <li><b>Babylonian cuneiform</b> — base 60 positional: 𒁹=1, 𒌋=10
+      composed within each sexagesimal digit; 𒑊 for zero;
+      positions separated by ASCII spaces.</li>
+  <li><b>Mayan</b> — base 20 positional, Unicode glyphs 𝋠..𝋳;
+      positions separated by spaces.</li>
+  <li><b>Hebrew (gematria)</b> — letter-based, 1-999, with
+      <code>׳</code>/<code>״</code> punctuation; preserves the
+      15→ט״ו / 16→ט״ז avoidance of sacred names.</li>
+</ul>
+
+<h4>Eastern digit scripts</h4>
+<p>Positional, base 10, with the script's own digit glyphs.</p>
+<ul>
+  <li><b>Arabic-Indic</b> ٠١٢٣٤٥٦٧٨٩</li>
+  <li><b>Persian / Extended Arabic-Indic</b> ۰۱۲۳۴۵۶۷۸۹</li>
+  <li><b>Devanagari</b> ०१२३४५६७८९</li>
+  <li><b>Bengali</b> ০১২৩৪৫৬৭৮৯</li>
+  <li><b>Gujarati</b> ૦૧૨૩૪૫૬૭૮૯</li>
+  <li><b>Tamil</b> ௦௧௨௩௪௫௬௭௮௯</li>
+  <li><b>Thai</b> ๐๑๒๓๔๕๖๗๘๙</li>
+  <li><b>Khmer</b> ០១២៣៤៥៦៧៨៩</li>
+  <li><b>Burmese</b> ၀၁၂၃၄၅၆၇၈၉</li>
+  <li><b>Lao</b> ໐໑໒໓໔໕໖໗໘໙</li>
+  <li><b>Tibetan</b> ༠༡༢༣༤༥༦༧༨༩</li>
+</ul>
+
+<h4>East Asian</h4>
+<ul>
+  <li><b>Chinese (simplified)</b> — 零一二三四五六七八九十百千万亿兆;
+      handles 一十X→十X at the start, internal-zero collapse to 零.
+      Range 0..10¹⁶-1.</li>
+  <li><b>Chinese financial (大写)</b> — same algorithm with
+      壹貳叁肆伍陸柒捌玖拾佰仟萬億兆 (the anti-fraud forms used on
+      cheques and contracts).</li>
+</ul>
+
+<h4>Spelled out</h4>
+<ul>
+  <li><b>English words</b> — "one hundred twenty-three thousand four
+      hundred fifty-six". Range 0..10¹⁵-1, signed
+      ("negative …"). Round-trips.</li>
+  <li><b>Italian (parole)</b> — "milleduecentotrentaquattro",
+      "due milioni"; standard elisions (ventuno, ventotto) and
+      accented tré at the end of compounds. Encode only.</li>
+  <li><b>NATO digits</b> — digit-by-digit aviation spelling
+      ("Zero One Two Three Fower Fife Six Seven Eight Niner").</li>
+</ul>
+
+<h3>Adding a new system</h3>
+<p>Drop <code>algos/&lt;id&gt;.lua</code> with this shape:</p>
+<pre><code>local U = require("lib.util")
+
+return {
+  id     = "myradix",
+  label  = "My base-7 thing",
+  group  = "Numeric Bases",
+  encode = function(s) return U.per_line(s, function(l)
+    return U.to_base(U.parse_int(l), 7)
+  end) end,
+  decode = function(s) return U.per_line(s, function(l)
+    return tostring(U.from_base(l, 7))
+  end) end,
+}</code></pre>
+<p>Then add the <code>id</code> to <code>ALGO_IDS</code> in
+<code>main.lua</code> and reload the plugin.</p>
+
+<h3>Notes</h3>
+<ul>
+  <li>All conversions are pure-Lua. No host capability is needed.</li>
+  <li>Lua 5.4 integers are 64-bit, so the practical ceiling is
+      ≈ 9.2 × 10¹⁸. Individual systems narrow that further
+      (Roman 1-3999, Hebrew 1-999, …) — limits are listed in the
+      catalog above.</li>
+  <li>Input is line-oriented: paste a column of values to batch-convert.</li>
+</ul>

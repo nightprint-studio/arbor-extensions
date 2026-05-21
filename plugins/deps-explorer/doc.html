@@ -1,0 +1,170 @@
+<h1>Dependency Explorer</h1>
+<p>
+  IntelliJ-style cross-toolchain dependency analyzer. Right-click any module
+  in the <strong>Build &amp; Run</strong> sidebar (owned by
+  <code>compile-action</code>) and pick <strong>Analyze dependencies…</strong>
+  to open the modal.
+</p>
+
+<h2>What it shows</h2>
+<p>
+  Two-pane modal modeled after IntelliJ's <em>Resolved Dependencies</em>
+  view:
+</p>
+<ul>
+  <li><strong>Left pane</strong> — every resolved artifact in the dependency
+      graph, one row per <code>group:artifact</code>. Each row shows the
+      version(s) seen, the scope chip (compile / runtime / test / dev …),
+      a <em>conflict</em> badge if the same coordinate was resolved at
+      multiple versions, and an <em>outdated</em> badge with the latest
+      Maven Central version when newer than the one in use.</li>
+  <li><strong>Right pane</strong> — <em>Usages of &lt;selected&gt;</em>:
+      every path from the project root down to an occurrence of the
+      currently-selected artifact, so you can see which dependency is
+      pulling it in.</li>
+</ul>
+
+<h2>Filters &amp; grouping</h2>
+<ul>
+  <li><strong>Search</strong> — filters by group / artifact substring.</li>
+  <li><strong>Scope filter</strong> — single-scope drop-down with all
+      scopes seen in the current graph.</li>
+  <li><strong>Group by</strong> — None, Scope, or Group / namespace.</li>
+  <li><strong>Outdated only</strong> — keeps just the artifacts whose
+      current version is older than the latest on Maven Central.</li>
+  <li><strong>Conflicts only</strong> — keeps just the artifacts pulled in
+      at multiple versions.</li>
+  <li>The footer shows the running totals: <em>N&nbsp;deps</em>,
+      <em>M&nbsp;outdated</em>, <em>K&nbsp;with conflicts</em>.</li>
+</ul>
+
+<h2>Supported toolchains</h2>
+<table class="shortcuts-table">
+  <thead><tr><th>Toolchain</th><th>Command</th><th>Latest-version registry</th></tr></thead>
+  <tbody>
+    <tr><td>Maven</td>  <td><code>mvn -B -f &lt;pom&gt; dependency:tree -DoutputType=text -DoutputFile=…</code></td><td>Maven Central <code>maven-metadata.xml</code></td></tr>
+    <tr><td>Gradle</td> <td><code>gradle dependencies --configuration runtimeClasspath</code> (uses <code>./gradlew</code> when present)</td><td>Maven Central <code>maven-metadata.xml</code></td></tr>
+    <tr><td>Cargo</td>  <td><code>cargo tree --workspace --charset ascii --color never --offline --frozen --manifest-path &lt;Cargo.toml&gt;</code> (auto-fallback to non-offline run when the local registry cache is missing deps)</td><td>crates.io <code>/api/v1/crates/&lt;name&gt;</code></td></tr>
+    <tr><td>npm / pnpm</td><td><code>npm ls --all --json</code> or <code>pnpm list --depth=Infinity --json</code></td><td>npm registry <code>/&lt;pkg&gt;/latest</code></td></tr>
+  </tbody>
+</table>
+<p>
+  Cargo workspaces are fully supported: when the manifest declares a
+  <code>[workspace]</code>, every member crate gets its own tree wrapped
+  under a synthetic <code>&lt;workspace&gt; (N&nbsp;crates)</code> root. Per-member
+  analyses (right-clicking a single crate in the sidebar) skip the
+  <code>--workspace</code> flag and resolve only that crate's tree.
+</p>
+<p>
+  The npm parser silently drops "ghost" optional dependencies that npm
+  lists but didn't actually install (the per-platform binary set of
+  <code>esbuild</code>, <code>rollup</code>, etc.) so the modal isn't
+  flooded with rows that have no installed version to compare against.
+</p>
+
+<h2>Java version selection</h2>
+<p>
+  For Maven and Gradle, the resolver runs under the <strong>same JDK</strong>
+  the user sees in the compile combo. We ask <code>compile-action</code> for
+  the resolved <code>JAVA_HOME</code> via the
+  <code>compile-action.resolve_java_home</code> service — that mirrors the
+  exact toolchain rules the build itself uses (per-config
+  <code>toolchain_id</code>, falling back to the active JDK). When no JVM
+  build is selected, the resolver falls back to whatever <code>java</code>
+  is on <code>PATH</code>.
+</p>
+
+<h2>Latest-version check</h2>
+<p>
+  After the dependency tree lands, the plugin fetches the latest published
+  version for every unique artifact in the graph from the appropriate
+  registry. One backend per ecosystem, all driven through
+  <code>arbor.http.get</code> (native reqwest) so the requests do
+  <strong>not</strong> create Jobs panel entries no matter how big the
+  graph is.
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Ecosystem</th><th>Endpoint</th><th>Field consumed</th></tr></thead>
+  <tbody>
+    <tr><td>Maven / Gradle</td><td><code>https://repo1.maven.org/maven2/&lt;group/with/slashes&gt;/&lt;artifact&gt;/maven-metadata.xml</code></td><td><code>&lt;latest&gt;</code> with fallback to <code>&lt;release&gt;</code></td></tr>
+    <tr><td>npm</td><td><code>https://registry.npmjs.org/&lt;pkg&gt;/latest</code></td><td><code>version</code></td></tr>
+    <tr><td>Cargo</td><td><code>https://crates.io/api/v1/crates/&lt;name&gt;</code></td><td><code>crate.max_stable_version</code> with fallback to <code>max_version</code></td></tr>
+  </tbody>
+</table>
+<p>
+  Each backend keeps its own settings-backed cache. Found versions live for
+  7 days; HTTP 404s ("not in this registry" — common for internal Maven
+  artifacts, private npm packages, path/proc-macro Cargo deps) cache for
+  24h so transient failures self-heal. A per-backend semaphore caps
+  concurrency at 6–8 parallel requests so the first analysis on a 200-dep
+  graph doesn't open 200 sockets at once.
+</p>
+<p>
+  Outdated rows surface a green <em>↑ &lt;latest&gt;</em> badge; the row
+  passes the <em>Outdated only</em> filter when the in-use version compares
+  lower than the published one (numeric segments compared first, fallback
+  to lexicographic). Artifacts with no installed version (e.g. npm optional
+  deps that didn't make it into <code>node_modules</code> on this OS) are
+  never flagged as outdated — there's nothing to compare against.
+</p>
+<p>
+  The modal's <strong>Refresh</strong> button bypasses the on-disk tree
+  cache, flushes every "miss" entry from all three registry caches
+  (Maven / npm / Cargo) and re-runs the resolver — useful if a previous
+  network glitch poisoned cache entries with bogus 404s.
+</p>
+
+<h2>Performance notes</h2>
+<ul>
+  <li>The modal opens immediately with a <em>loading</em> state —
+      first-run resolves can take 5–30s (<code>mvn dependency:tree</code>
+      on a fat reactor; <code>cargo tree --workspace</code> on a 10-crate
+      workspace; <code>npm ls --all</code> on a heavy node_modules).</li>
+  <li>The plugin streams updates: tree first, registry badges 3–8s later.</li>
+  <li>All work runs under the Job system, so the UI stays responsive and
+      you can cancel the underlying jobs from the Jobs panel.</li>
+  <li>Cargo runs <code>--offline --frozen</code> opportunistically when
+      <code>Cargo.lock</code> is present, falling back to a normal run
+      transparently if the local registry cache is missing deps.</li>
+</ul>
+
+<h2>How it talks to the modal</h2>
+<p>
+  The plugin pushes its result via
+  <code>arbor.ui.tree.set("deps:&lt;request_id&gt;", …)</code>. The frontend
+  store <code>depsExplorerStore</code> filters the unified
+  <code>arbor://contributions-changed</code> event for
+  <code>point="arbor:tree-state"</code>, recognises the
+  <code>deps:</code> prefix and pops the modal up. Subsequent updates with
+  the same id (e.g. when Maven Central data lands) patch the open modal
+  reactively.
+</p>
+
+<h2>Permissions</h2>
+<ul>
+  <li><code>terminal = "any"</code> — runs <code>mvn</code>,
+      <code>gradle</code>/<code>./gradlew</code>, <code>cargo</code>,
+      <code>npm</code>/<code>pnpm</code>, <code>curl</code>.</li>
+  <li><code>filesystem = "sandbox"</code> — reads <code>pom.xml</code>,
+      <code>Cargo.toml</code>, <code>package.json</code>; writes per-request
+      temp files to the OS temp directory.</li>
+  <li><code>service_call = true</code> — calls
+      <code>compile-action.resolve_java_home</code>.</li>
+  <li><code>toolchain_read = true</code> — fallback when no JVM build is
+      active.</li>
+  <li><code>env_read = true</code> — inherits <code>PATH</code>,
+      <code>JAVA_HOME</code>, <code>TEMP</code>.</li>
+</ul>
+
+<h2>Limitations</h2>
+<ul>
+  <li>Only the first dependency tree found in the output is parsed — for
+      multi-module Maven, click <strong>Analyze dependencies</strong> on the
+      specific child module you care about.</li>
+  <li>Cargo glob workspace members (<code>crates/*</code>) are not yet
+      enumerable from the sidebar; you can still right-click any literal
+      member.</li>
+  <li>Gradle output is read from <code>runtimeClasspath</code>; falling
+      back to <code>compileClasspath</code> when the former is missing.
+      Other configurations need a future flag.</li>
+</ul>

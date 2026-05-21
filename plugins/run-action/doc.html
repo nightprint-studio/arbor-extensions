@@ -1,0 +1,145 @@
+<h3>Run Action</h3>
+<p>
+  Application runner that orchestrates the <em>build → run</em> flow. Depends on
+  <code>compile-action</code> for the build step.
+</p>
+
+<h4>What it does</h4>
+<ul>
+  <li>Auto-detects the project type (Maven / Gradle / Rust / npm / Tauri) and
+      seeds default run configurations on first open.</li>
+  <li>Exposes a <strong>Play</strong> combo button in the repo actions row; the
+      dropdown lists the run configs for the active repo plus any global ones.</li>
+  <li>For non-Tomcat runs it asks <code>compile-action</code> to build first
+      (via <code>arbor.service.call</code>) and launches the run command when
+      the build succeeds (subscribing to the
+      <code>compile-action:build-done</code> event via
+      <code>arbor.events.on</code>).</li>
+  <li>For Tomcat runs the entire <em>build → clean webapps → deploy WAR →
+      start Tomcat</em> sequence is expressed as a single
+      <code>arbor.pipeline</code> with the build as stage 1, so the user
+      sees one unified progress timeline (and resume / cancel work across
+      both phases). Catalina itself is spawned out of
+      <code>on_pipeline_done</code> as a long-running service — it never
+      becomes a pipeline stage.</li>
+</ul>
+
+<h4>Build &amp; Run sidebar contributions</h4>
+<p>
+  Extends the <em>Build &amp; Run</em> tree owned by <code>compile-action</code>
+  through the contribution model:
+</p>
+<ul>
+  <li>Toolbar — leftmost <strong>Run application</strong> button (green
+      <code>Play</code>, <kbd>Shift</kbd>+<kbd>F10</kbd>) that runs the
+      currently-selected run config, plus a companion <strong>Debug</strong>
+      button (<code>Bug</code>, <kbd>Shift</kbd>+<kbd>F9</kbd>) that launches
+      the same config with the JDWP / Node inspector agent forced on.</li>
+  <li><em>Run configurations</em> tree section listing this repo's saved
+      configs grouped by template type (Spring Boot / Tomcat / Java JAR /
+      Rust / Node.js); single-group projects skip the group header.
+      Each row uses the template's icon (<code>Leaf</code> for Spring,
+      <code>Server</code> for Tomcat, <code>Package</code> for JAR / Node,
+      <code>Box</code> for Cargo) and carries a <code>default</code> badge
+      on the selected one. Double-click runs.</li>
+  <li>Per-row hover actions on <code>kind = "run_config"</code> nodes:
+      <strong>Restart</strong> (<code>RotateCw</code>); on Tomcat configs
+      additionally <strong>Start without building</strong>
+      (<code>SkipForward</code>, also <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd>)
+      and <strong>Open Tomcat root</strong> (<code>FolderOpen</code>).</li>
+  <li>Right-click context menu on run config rows: <em>Run with arguments…</em>
+      opens the project run-settings form pre-filtered to that config.</li>
+</ul>
+<p>
+  See the contribution-point reference in the <code>compile-action</code>
+  docs for what each slot accepts; the <em>Plugin Development → API: UI →
+  Tree-kind sidebars</em> page covers the model in depth.
+</p>
+
+<h4>Supported templates</h4>
+<p>
+  Each run configuration is backed by a <em>template</em>. The template
+  declares the editable fields and generates the final command (or drives the
+  Tomcat deploy) at save time.
+</p>
+<table class="shortcuts-table">
+  <thead><tr><th>Template</th><th>Template-specific fields</th><th>Debug</th></tr></thead>
+  <tbody>
+    <tr><td><code>simple_java</code></td><td>jar_path, main_class, vm_args</td><td>JDWP agent flag</td></tr>
+    <tr><td><code>spring</code></td><td>tool (maven / gradle), active_profile, extra_args, vm_args</td><td>JDWP via <code>-Dspring-boot.run.jvmArguments</code> (maven) or <code>JAVA_OPTS</code> (gradle)</td></tr>
+    <tr><td><code>tomcat</code></td><td>tomcat_home, war_relative_path, vm_args</td><td>JPDA (<code>catalina jpda run</code> + <code>JPDA_ADDRESS</code>)</td></tr>
+    <tr><td><code>cargo</code></td><td>bin, features, release, args</td><td>—</td></tr>
+    <tr><td><code>npm</code></td><td>package_manager, script, args</td><td><code>NODE_OPTIONS=--inspect</code></td></tr>
+  </tbody>
+</table>
+<p>
+  All Java templates expose a <code>debug_port</code> field (empty = disabled);
+  npm exposes the same for Node inspector. The plugin composes the correct
+  flag / env for the template at save time.
+</p>
+<p>
+  The mode chosen at launch time wins over the configured port:
+  <kbd>Shift</kbd>+<kbd>F10</kbd> (<em>Run</em>) always disables the agent,
+  even on Tomcat configs where <code>debug_port</code> is set;
+  <kbd>Shift</kbd>+<kbd>F9</kbd> (<em>Debug</em>) always enables it, falling
+  back to <code>5005</code> for JDWP / <code>9229</code> for Node when no
+  port is configured.
+</p>
+
+<h4>Run Configurations modal</h4>
+<p>
+  Opened from the combo's <strong>⚙ Run settings</strong> entry. IntelliJ-style
+  tree layout: templates group the configs on the left, the selected config's
+  editor appears on the right. Toolbar: <kbd>+▾</kbd> (new from template),
+  <kbd>−</kbd> (remove), <kbd>📋</kbd> (duplicate). Add / remove / duplicate
+  update the tree in place — no modal flicker. The <strong>Behaviour</strong>
+  card at the top of the content is always visible and controls the
+  auto-stop policy (inherit / always stop / never stop).
+</p>
+
+<h4>Per-config &ldquo;Build before run&rdquo;</h4>
+<ul>
+  <li><strong>Use currently-selected build</strong> (default) — runs the build
+      config currently active in the <em>compile</em> combo, then the run.</li>
+  <li><strong>Skip build</strong> — default for commands that compile inline
+      (<code>cargo run</code>, <code>mvn spring-boot:run</code>, <code>npm run dev</code>,
+      <code>cargo tauri dev</code>).</li>
+</ul>
+
+<h4>Keybindings</h4>
+<table class="shortcuts-table">
+  <thead><tr><th>Shortcut</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><kbd>Shift</kbd>+<kbd>F10</kbd></td><td>Run the selected configuration (debug agent forced off).</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>F9</kbd></td><td>Debug the selected configuration (debug agent forced on, default port if unset).</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F10</kbd></td><td>Tomcat only — start <code>catalina</code> against the existing WAR (skip build &amp; deploy).</td></tr>
+  </tbody>
+</table>
+
+<h4>Relationship with <code>compile-action</code></h4>
+<p>
+  <code>run-action</code> declares <code>compile-action</code> as a hard
+  dependency and uses two cross-plugin APIs:
+</p>
+<ul>
+  <li>
+    <code>arbor.service.call(&quot;compile-action.spawn_build&quot;, { repo_path, build_id, silent? })</code>
+    — starts a build as a Job and resolves with the build config snapshot.
+    Used for non-Tomcat runs. The optional <code>silent</code> flag (passed
+    by <code>run-action</code>) suppresses <code>compile-action</code>'s own
+    success / failure notifications, so the run flow emits a single unified
+    set instead of layering two.
+  </li>
+  <li>
+    <code>arbor.service.call(&quot;compile-action.resolve_build&quot;, { repo_path, build_id })</code>
+    — resolves a build config + env + cwd + command WITHOUT spawning anything.
+    Used for Tomcat runs so the build can run as the first stage of the
+    deploy pipeline (instead of as a separate Job).
+  </li>
+  <li>
+    <code>arbor.events.on(&quot;compile-action:build-done&quot;, fn)</code>
+    — fired by <code>compile-action</code> with <code>{ repo_path, success, exit_code, build_cfg, java_home }</code>
+    whenever any build Job finishes. Used by the non-Tomcat path to dequeue
+    and execute the queued run.
+  </li>
+</ul>
