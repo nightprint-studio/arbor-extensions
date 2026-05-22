@@ -26,3 +26,12 @@ service_export = true
 on_plugin_load = true
 on_repo_open   = false
 on_tab_switch  = false
+
+# Hard-required: this plugin only exposes the `chunk-merger-bin.merge` service
+# that cloud-storage's chunks.lua calls into. Without cloud-storage there's no
+# caller, so refuse to load standalone — the host's dep cascade also disables
+# us automatically if cloud-storage is turned off.
+[[dependencies]]
+name     = "cloud-storage"
+version  = ""
+optional = false
