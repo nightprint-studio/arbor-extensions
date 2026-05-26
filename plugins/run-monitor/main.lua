@@ -30,6 +30,14 @@ local PANEL_ID  = "services"
 -- that's about to be torn down).
 local refresh_timer = nil
 
+-- Fingerprint of the last payload pushed to the host. We rebuild the panel
+-- snapshot on every tick (cheap), but only forward it to the host when the
+-- shape actually changed — skipping the IPC roundtrip on idle ticks. The
+-- host's ContributionRegistry has the same dedup baked in as a safety net,
+-- but doing it here avoids the lua→rust hop in the common "nothing
+-- changed" case.
+local last_payload_fp = nil
+
 -- Format an elapsed-time string from a unix-seconds start. Mirrors the
 -- "4s" / "1m 12s" / "2h 3m" shape used by JobsOverlay so users see the same
 -- vocabulary across surfaces.
@@ -150,9 +158,10 @@ local function build_service_nodes(jobs)
   return nodes
 end
 
--- Push a fresh snapshot into the panel. Always safe to call: the host's
--- contribution store dedupes by (plugin, panel) so calling this when nobody
--- has the panel open is just a cheap write-through with no UI cost.
+-- Push a fresh snapshot into the panel. Always safe to call: identical
+-- snapshots are deduped both here (via a JSON fingerprint) and in the host
+-- registry, so polling-when-idle costs at most a `job.list` plus a json
+-- encode — no IPC, no frontend refetch.
 local function refresh()
   local ok, jobs = pcall(arbor.job.list)
   if not ok then jobs = {} end
@@ -185,11 +194,20 @@ local function refresh()
     }
   end
 
-  arbor.ui.set_panel_content(PANEL_ID, {
+  local payload = {
     title   = "Services",
     nodes   = nodes,
     actions = actions,
-  })
+  }
+
+  -- Fingerprint via arbor.json.encode — pure-Lua so it's cheap relative to
+  -- the IPC hop we're avoiding. If encoding fails for any reason, fall
+  -- back to always pushing (correctness over the dedup optimisation).
+  local enc_ok, fp = pcall(arbor.json.encode, payload)
+  if enc_ok and fp == last_payload_fp then return end
+  if enc_ok then last_payload_fp = fp end
+
+  arbor.ui.set_panel_content(PANEL_ID, payload)
 end
 
 -- ── Lifecycle ────────────────────────────────────────────────────────────────

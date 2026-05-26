@@ -14,6 +14,30 @@ The Arbor Marketplace pulls a tiny `index.json` from this repo, then resolves ea
 
 The same model is used for themes.
 
+### Entry shapes
+
+`index.json` accepts two shapes for each entry; both surface as **Community** in Arbor.
+
+**Internal** — the plugin/theme lives inside *this* repo (the maintainer-hosted catalog):
+
+```json
+{ "subpath": "plugins/my-plugin" }
+```
+
+**External** — the plugin/theme lives in a third-party GitHub repo. The registry only stores a pointer; the author keeps full ownership of the code in their own repo:
+
+```json
+{
+  "repo": "https://github.com/some-author/their-plugin",
+  "ref": "v1.2.0",
+  "pinned_sha": "a1b2c3d4e5f60718"
+}
+```
+
+Optional fields for both shapes: `ref` (tag, branch, or SHA — defaults to `main`), `subpath` (when the repo hosts multiple plugins).
+
+External-only: `pinned_sha` — an explicit commit SHA the resolver must verify against. Recommended whenever `ref` points at a moving target (branch, version tag). When omitted, the Marketplace shows an **Unpinned** badge so users can see at a glance that the entry tracks a moving ref.
+
 ## Maturity buckets
 
 Each plugin entry declares its maturity. The buckets match Arbor's own status taxonomy:
@@ -86,11 +110,22 @@ This means anyone can host their own mirror with the same structure as this repo
 
 ## Publishing a plugin
 
-> *(Authoring guide draft — fill in repo conventions as they settle.)*
+You don't need to drop your code in this repo. The supported path for third-party plugins is to keep your code in your own GitHub repo and submit a one-line **External** pointer to `index.json`.
 
-1. Put your plugin in a public GitHub repo, with `plugin.toml` and `main.lua` at the root (or under a subpath).
-2. Open a pull request on this repo adding a pointer entry to `index.json` with the plugin name, repo URL, and (optionally) the subpath.
-3. After the PR is merged the plugin appears in every Arbor instance's Marketplace catalog on the next refresh.
+1. Put your plugin in a public GitHub repo. `plugin.toml` and `main.lua` at the repo root (single-plugin layout) or under a subpath (multi-plugin layout).
+2. Tag the release you want surfaced (e.g. `v1.0.0`) and resolve the commit SHA: `git rev-parse v1.0.0`.
+3. Open a pull request on this repo that adds an entry to the `plugins` array:
+   ```json
+   {
+     "repo": "https://github.com/your-handle/your-plugin",
+     "ref": "v1.0.0",
+     "pinned_sha": "<the SHA from step 2>"
+   }
+   ```
+   Add `"subpath": "plugins/foo"` if your plugin sits under a folder in the repo.
+4. Future version bumps are themselves one-line PRs (update `ref` + `pinned_sha`). That re-runs the review path so a compromised upstream can't silently push code through the Marketplace — only PR-merged SHAs are ever fetched.
+
+`pinned_sha` is optional but strongly recommended for tag-based refs; without it Arbor surfaces an **Unpinned** badge in the Marketplace detail view.
 
 The full plugin development reference — manifest schema, hooks, the Lua API surface — lives inside Arbor's in-app **Docs** panel.
 
