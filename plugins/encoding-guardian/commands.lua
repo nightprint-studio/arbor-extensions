@@ -66,7 +66,7 @@ end
 
 local function open_scan_modal(result)
   local clean = #result.hits == 0
-  arbor.ui.form.open({
+  arbor.ui.form({
     title         = clean
                        and string.format("Encoding scan - clean (%d files scanned)",
                                           result.scanned)

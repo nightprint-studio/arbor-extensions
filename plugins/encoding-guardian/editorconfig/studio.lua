@@ -258,7 +258,7 @@ function M.open()
   -- defaults block so the user has something worth Save'ing.
   if #state.cfg.sections == 0 then state.cfg = default_cfg_for_new_file() end
 
-  arbor.ui.form.open({
+  arbor.ui.form({
     title         = ".editorconfig - Encoding Guardian",
     width         = "880px",
     height        = "640px",
