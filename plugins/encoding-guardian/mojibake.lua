@@ -26,6 +26,9 @@ M.PREFIX = ch(0x00E2) .. ch(0x20AC)
 -- One row per known mojibake cluster. `label` is what we surface in scan
 -- results; `to` is the original character we restore on fix.
 M.PATTERNS = {
+  -- U+20AC (€) family — comes from the first non-ASCII byte of any
+  -- U+2000-U+20FF codepoint when read as CP1252. Covers most editorial
+  -- punctuation.
   { from = ch(0x00E2) .. ch(0x20AC) .. ch(0x00A6), to = ch(0x2026), label = "ellipsis"     },
   { from = ch(0x00E2) .. ch(0x20AC) .. ch(0x201D), to = ch(0x2014), label = "em dash"      },
   { from = ch(0x00E2) .. ch(0x20AC) .. ch(0x2013), to = ch(0x2013), label = "en dash"      },
@@ -33,9 +36,19 @@ M.PATTERNS = {
   { from = ch(0x00E2) .. ch(0x20AC) .. ch(0x0153), to = ch(0x201C), label = "lquote"       },
   { from = ch(0x00E2) .. ch(0x20AC) .. ch(0x009D), to = ch(0x201D), label = "rquote"       },
   { from = ch(0x00E2) .. ch(0x20AC) .. ch(0x00A2), to = ch(0x2022), label = "bullet"       },
+  -- U+2020 (dagger) family — codepoints U+2100-U+21FF.
   { from = ch(0x00E2) .. ch(0x2020) .. ch(0x2019), to = ch(0x2192), label = "right arrow"  },
+  -- U+201D (right curly quote) family — codepoints U+2400-U+25FF, common
+  -- for box-drawing, geometric shapes (circles, squares), arrows.
   { from = ch(0x00E2) .. ch(0x201D) .. ch(0x20AC), to = ch(0x2500), label = "box-drawing"  },
+  { from = ch(0x00E2) .. ch(0x2014) .. ch(0x008F), to = ch(0x25CF), label = "black circle" },
+  { from = ch(0x00E2) .. ch(0x2014) .. ch(0x2039), to = ch(0x25CB), label = "white circle" },
+  { from = ch(0x00E2) .. ch(0x2014) .. ch(0x2026), to = ch(0x2605), label = "black star"   },
 }
+
+-- Secondary "I was reinterpreted" prefix: a-circumflex + em-dash, common
+-- for U+2400-U+25FF codepoints (geometric shapes, arrows, box-drawing).
+M.PREFIX_EMDASH = ch(0x00E2) .. ch(0x2014)
 
 -- ── Detection ──────────────────────────────────────────────────────────────
 
@@ -54,8 +67,13 @@ function M.detect(content)
       total = total + hits
     end
   end
-  local _, prefix_hits = content:gsub(M.PREFIX, "")
-  local exotic = prefix_hits - total
+  -- The two prefixes — `â€` (U+20AC) and `â—` (U+2014) — are the giveaway
+  -- byte pairs that mark CP1252 mojibake. Sum the residual after known
+  -- patterns are subtracted so the "exotic" counter only flags clusters
+  -- our table doesn't repair.
+  local _, prefix_euro_hits  = content:gsub(M.PREFIX,        "")
+  local _, prefix_emdash_hits = content:gsub(M.PREFIX_EMDASH, "")
+  local exotic = (prefix_euro_hits + prefix_emdash_hits) - total
   if exotic < 0 then exotic = 0 end
   return { total = total, breakdown = breakdown, exotic = exotic }
 end
