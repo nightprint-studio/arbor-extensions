@@ -1,0 +1,17 @@
+name        = "encoding-guardian"
+version     = "1.0.0"
+description = "Catches UTF-8/CP1252 mojibake, BOM/EOL/charset mismatches before they reach a commit. Per-project toggle + EditorConfig studio."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "git-workflow"
+keywords    = ["encoding", "utf-8", "mojibake", "editorconfig", "pre-commit", "lint"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+[permissions]
+fs   = "write"   # scan + fix files, write .editorconfig
+git  = "read"    # resolve active repo root
+
+[hooks]
+on_plugin_load = true
+on_pre_commit  = true

@@ -1,0 +1,40 @@
+<h2>UI Protocol Lab</h2>
+
+<p>A test bench for the plugin UI dispatch + event/patch protocol. Everything is in one modal so you can poke each piece and watch it react live. Open it from the Command Palette (<kbd>Ctrl+K</kbd>) → <strong>UI Lab: open playground</strong>.</p>
+
+<h3>Editor widget (CodeMirror 6)</h3>
+<ul>
+  <li><strong>Value-bearing</strong> — the editor's text is the form field <code>doc</code>; it is submitted like any field and the host pushes content into it with <code>set_value</code> (try <em>Load sample</em> / <em>Normalize</em> / <em>Clear</em>).</li>
+  <li><strong><code>on_edit</code></strong> — debounced inside the widget (250&nbsp;ms here) and <em>scoped</em>: the handler gets <code>{ node_id, slot = "edit", value, state }</code>, never the whole form. Type and watch the telemetry update.</li>
+  <li><strong><code>on_select</code></strong> — fires on cursor moves / range selects with <code>{ from, to, text }</code>. Click around or select text and watch the <em>Selection</em> line.</li>
+  <li><strong><code>scope_state</code></strong> — the editor declares <code>{ "edits" }</code>, so the slice <code>state.edits</code> rides along in each <code>on_edit</code> payload. The plugin logs the value it sees to prove the round-trip (Settings → Plugins → logs).</li>
+</ul>
+
+<h3>Granular updates (no re-mount)</h3>
+<ul>
+  <li><strong><code>patch</code> · <code>set</code></strong> — the <em>Characters / Lines / on_edit&nbsp;fires</em> labels are updated by a deep assign at a path inside each node.</li>
+  <li><strong><code>patch</code> · <code>merge</code></strong> — the JSON-validity banner shallow-merges <code>variant</code> + <code>text</code> as you type valid / invalid JSON.</li>
+  <li><strong><code>patch</code> · <code>append</code> / <code>remove</code></strong> — <em>Append note</em> pushes a child into a container; <em>Remove last note</em> splices it back out by id.</li>
+  <li><strong><code>set_state_path</code></strong> — the edit counter and last selection are written into the form's opaque state one slice at a time.</li>
+</ul>
+
+<h3>Command invocation</h3>
+<ul>
+  <li><strong>From a button</strong> — <em>Apply via command</em> carries <code>dispatch = { kind = "command", id = "ui-protocol-lab::apply", args = { source = "button" } }</code>. It fires the registered <code>apply</code> command instead of a plain action.</li>
+  <li><strong>At runtime</strong> — the palette entry <em>UI Lab: fire apply via command.fire</em> calls <code>arbor.command.fire("ui-protocol-lab::apply", …)</code>. Cross-plugin invocation works identically: any plugin holding the <code>command_invoke</code> permission can fire an <code>invocable</code> command, gated by the command's declared <code>required</code> tier.</li>
+  <li><strong>Host built-ins</strong> — the <em>Host commands (Fase 2b)</em> section fires <code>arbor:repo.refresh</code> and <code>arbor:app.open_settings</code> (run by Arbor itself), both from a button <code>dispatch</code> and from <code>arbor.command.fire("arbor:repo.refresh")</code>. Same gating; these two need no permission tier, while the <code>arbor:git.*</code> built-ins additionally require <code>git = "write"</code>.</li>
+</ul>
+
+<h3>Dispatch union</h3>
+<p>Buttons mix both forms on purpose: <em>Load sample / Normalize / Clear</em> use a bare <code>action</code> string (whole-form payload), while <em>Apply via command</em> uses a <code>dispatch</code> object. The select's <code>actions.change</code> is a <code>dispatch</code> target too, so changing it sends a scoped payload rather than the whole form.</p>
+
+<h3>Main-area view (add_view)</h3>
+<p>The same protocol also drives a <strong>body surface</strong>, not just modals. This plugin registers a view with <code>arbor.ui.add_view</code> — open it from the <strong>UI&nbsp;Lab&nbsp;Dashboard</strong> icon in the left activity bar, the Command Palette (<em>Open View: UI Lab Dashboard</em>), or <kbd>Alt+Shift+V</kbd>.</p>
+<ul>
+  <li><strong>Same renderer</strong> — the view body is the full <code>FormNodeRenderer</code>, so sections, editor, buttons and the dispatch / scoped / patch protocol all work exactly as in the modal.</li>
+  <li><strong><code>on_view_open</code> / <code>on_view_close</code></strong> — the plugin fills the body from <code>on_view_open</code> with <code>arbor.ui.set_panel_content</code> and logs the close.</li>
+  <li><strong>Live patch in the body</strong> — <em>Tick</em> updates a label + banner via a single <code>arbor.ui.form.patch</code> (no re-mount); the in-body editor fires a scoped <code>on_edit</code> just like the modal. View node ids are distinct from the modal's, so the shared patch channel never cross-talks.</li>
+  <li><strong>Placement</strong> — registered as <code>placement = "graph"</code> (keeps the tab bar + bottom panel); switch it to <code>"main"</code> in <code>main.lua</code> to take over the whole body.</li>
+</ul>
+
+<p>This plugin is a development aid — it touches no repository state. Remove it from <code>index.json</code> when you're done testing.</p>

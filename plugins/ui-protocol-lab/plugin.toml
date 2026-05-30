@@ -1,0 +1,21 @@
+name        = "ui-protocol-lab"
+version     = "1.0.0"
+description = "Hands-on test bench for the plugin UI dispatch + event/patch protocol: the editor widget, scoped on_edit/on_select events, granular patch / set_state_path / set_value updates, and command invocation."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "developer-tools"
+keywords    = ["dev", "test", "editor", "codemirror", "dispatch", "patch"]
+arbor_api   = 1
+doc_file    = "doc.html"
+experimental = true
+
+[permissions]
+# Needed to fire registered commands — via a form button's
+# `dispatch = { kind = "command", … }` and via `arbor.command.fire(...)`.
+command_invoke = true
+
+[hooks]
+on_plugin_load = true
+# Fired on this plugin when its add_view view opens / closes.
+on_view_open  = true
+on_view_close = true

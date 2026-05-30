@@ -8,6 +8,7 @@
     { "subpath": "plugins/run-action" },
     { "subpath": "plugins/run-monitor" },
     { "subpath": "plugins/commit-validator" },
+    { "subpath": "plugins/encoding-guardian" },
     { "subpath": "plugins/gitignore-suggester" },
     { "subpath": "plugins/release-notes" },
     { "subpath": "plugins/cloud-storage" },
@@ -21,7 +22,8 @@
     { "subpath": "plugins/ron-studio" },
     { "subpath": "plugins/toml-studio" },
     { "subpath": "plugins/yaml-studio" },
-    { "subpath": "plugins/properties-studio" }
+    { "subpath": "plugins/properties-studio" },
+    { "subpath": "plugins/ui-protocol-lab" }
   ],
   "themes": [
     { "subpath": "themes/tokyo-night.json" },
