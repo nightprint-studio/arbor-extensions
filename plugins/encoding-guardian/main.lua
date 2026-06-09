@@ -19,12 +19,18 @@
 local commands       = require("commands")
 local precommit      = require("precommit")
 local settings_panel = require("settings_panel")
-local studio         = require("editorconfig.studio")
+-- editorconfig.studio: temporarily disabled. The form-DSL primitives
+-- available to plugins today aren't enough to reach the polish bar of
+-- the host-side TOML / JSON / YAML studio modals (denser inspector
+-- panels, type-icon tree, tighter cards, integrated toolbar). Re-enable
+-- once the plugin UI surface has been extended — see the host TODO on
+-- "what plugins can / can't render".
+-- local studio = require("editorconfig.studio")
 
 arbor.events.on("on_plugin_load", function(ctx)
   settings_panel.register()
   commands.register()
-  studio.register()
+  -- studio.register()    -- see disabled require above
   precommit.register()
   arbor.log.info(
     "encoding-guardian ready (api_version=" .. tostring(ctx.api_version) .. ")"

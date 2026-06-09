@@ -11,8 +11,7 @@ local function make(template_id, overrides)
   local cfg = templates.new_config(template_id)
   if not cfg then return nil end
   for k, v in pairs(overrides or {}) do cfg[k] = v end
-  local tpl = templates.build_get(template_id)
-  if tpl then cfg.command = tpl.build_command(cfg) end
+  cfg.command = templates.full_command(cfg)
   return cfg
 end
 

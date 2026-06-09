@@ -465,7 +465,7 @@ function M.handle_cfg_import_save(ctx)
 
   parsed.id      = "cfg_" .. tostring(math.floor((os.time() % 1000000) * 1000)) ..
                    "_" .. tostring(math.random(1000, 9999))
-  parsed.command = tpl.build_command(parsed)
+  parsed.command = templates.full_command(parsed)
 
   local cfgs = M.load()
   cfgs[#cfgs+1] = parsed

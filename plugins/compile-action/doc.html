@@ -93,6 +93,16 @@
   <code>src-tauri/tauri.conf.json</code> → Cargo + frontend set, <code>go.mod</code>
   → single Make-style entry.
 </p>
+<p>
+  Every template's <strong>Build Options</strong> card also exposes an
+  <strong>Additional arguments</strong> field, appended verbatim to the
+  resolved command. This is where ad-hoc <code>-D</code> system properties go
+  (e.g. <code>-Dfilter=xxx</code>, <code>-DskipITs</code>) — different from
+  <code>MAVEN_OPTS</code> / <code>GRADLE_OPTS</code>, which set JVM flags for
+  the build-tool process rather than arguments handed to the build itself. For
+  npm / pnpm, prefix the value with <code>--</code> to forward args to the
+  script.
+</p>
 
 <h2>Build Configurations modal</h2>
 <p>

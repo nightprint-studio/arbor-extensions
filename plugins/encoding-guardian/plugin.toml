@@ -1,5 +1,5 @@
 name        = "encoding-guardian"
-version     = "1.0.0"
+version     = "1.1.0"
 description = "Catches UTF-8/CP1252 mojibake, BOM/EOL/charset mismatches before they reach a commit. Per-project toggle + EditorConfig studio."
 author      = "Nightprint Studio"
 repository  = "https://github.com/nightprint-studio/arbor-extensions"

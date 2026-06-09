@@ -41,13 +41,6 @@
     the active repo. Other issues (BOM, EOL, invalid bytes) need a
     manual fix or an <code>.editorconfig</code> rule.
   </li>
-  <li>
-    <strong>Encoding Guardian: Open .editorconfig studio</strong> —
-    Studio-style modal: a tree of section blocks on the left, a
-    structured form on the right (with a <em>Raw</em> toggle that swaps
-    in a CodeMirror editor for the file verbatim). Creates the file
-    from sensible defaults when it doesn't exist yet.
-  </li>
 </ul>
 
 <h2>What gets checked</h2>
@@ -86,8 +79,7 @@
 <h2>Required permissions</h2>
 <ul>
   <li><code>fs = "write"</code> — scan reads source files; the fix command
-      rewrites them; the EditorConfig studio writes
-      <code>.editorconfig</code>.</li>
+      rewrites them.</li>
   <li><code>git = "read"</code> — resolves the active repo root.</li>
 </ul>
 
@@ -106,11 +98,5 @@
     Auto-fix only repairs the known mojibake sequences. Exotic
     <code>&#226;&#8364;&lt;X&gt;</code> sequences are surfaced in the scan modal but
     not auto-rewritten — fix them by hand to avoid guessing.
-  </li>
-  <li>
-    The CodeMirror editor renders <code>.editorconfig</code> with the
-    <code>.properties</code> grammar so keys, values and <code>#</code>
-    comments highlight correctly; <code>[section]</code> headers fall
-    through as plain text (no INI parser ships with the host).
   </li>
 </ul>

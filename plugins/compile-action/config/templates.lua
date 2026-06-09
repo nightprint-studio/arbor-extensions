@@ -31,6 +31,7 @@ local function common_defaults()
   return {
     description          = "",
     notify_on_completion = true,
+    extra_args           = "",
     profile_env          = { dev = {}, prod = {}, test = {} },
     before_launch       = {},
   }
@@ -193,6 +194,20 @@ local function build_options_section(id, children)
   }
 end
 
+-- Common free-form command-line arguments, appended verbatim to every
+-- template's resolved command. This is where ad-hoc `-D` system properties
+-- live (e.g. `-Dfilter=xxx`, `-DskipITs`) — distinct from MAVEN_OPTS /
+-- GRADLE_OPTS, which are JVM flags for the build tool process, not args
+-- handed to the build itself.
+local function extra_args_field(id, cfg)
+  return { type = "text", name = fn(id, "extra_args"),
+    label = "Additional arguments", default = cfg.extra_args or "",
+    placeholder = "-Dfilter=xxx -DskipITs",
+    hint  = "Appended verbatim to the command line — e.g. -D system "
+         .. "properties passed to the build tool. For npm/pnpm, prefix "
+         .. "with -- to forward args to the script." }
+end
+
 local function resolved_command(cfg, tpl)
   return {
     { type = "divider" },
@@ -200,16 +215,22 @@ local function resolved_command(cfg, tpl)
       content = "Resolved command" },
     { type = "code", language = "bash", copy = true,
       toast = "Command copied",
-      text  = tpl.build_command(cfg) },
+      text  = M.full_command(cfg) },
   }
 end
 
--- Compose the full schema from the parts above.
+-- Compose the full schema from the parts above. The common "Additional
+-- arguments" field is tacked onto the end of the template's own build
+-- options so it appears in the same card for every template.
 local function compose(cfg, tpl, options_children)
   local id = cfg.id
+  local build_children = {}
+  for _, c in ipairs(options_children) do build_children[#build_children+1] = c end
+  build_children[#build_children+1] = extra_args_field(id, cfg)
+
   local nodes = {
     general_section(cfg, tpl.toolchain_kind),
-    build_options_section(id, options_children),
+    build_options_section(id, build_children),
     env_section(cfg),
     profile_env_section(cfg),
     before_launch_section(cfg),
@@ -476,7 +497,7 @@ M.build.npm = {
   toolchain_kind = "node",
   new_defaults   = function()
     return { name = "npm build", package_manager = "npm", script = "build",
-             extra_args = "", node_options = "" }
+             node_options = "" }
   end,
   schema = function(cfg)
     local id = cfg.id
@@ -494,11 +515,6 @@ M.build.npm = {
             label = "Script", default = cfg.script or "build",
             hint  = "package.json script (e.g. 'build', 'lint')" },
         }},
-      { type = "text", name = fn(id, "extra_args"),
-        label = "Extra arguments", default = cfg.extra_args or "",
-        placeholder = "-- --watch",
-        hint  = "Appended after the script name. For npm/pnpm a leading "
-             .. "'--' separator is required to forward args to the script." },
       { type = "text", name = fn(id, "node_options"),
         label = "NODE_OPTIONS", default = cfg.node_options or "",
         placeholder = "--max-old-space-size=4096",
@@ -509,10 +525,8 @@ M.build.npm = {
   build_command = function(cfg)
     local pm  = cfg.package_manager or "npm"
     local scr = cfg.script or "build"
-    local extra = (cfg.extra_args and cfg.extra_args ~= "")
-                  and (" " .. cfg.extra_args) or ""
-    if pm == "yarn" then return "yarn " .. scr .. extra end
-    return pm .. " run " .. scr .. extra
+    if pm == "yarn" then return "yarn " .. scr end
+    return pm .. " run " .. scr
   end,
   derived_env = function(cfg)
     local env = {}
@@ -565,6 +579,19 @@ function M.build_get(template_id)
   return M.build[template_id]
 end
 
+-- Resolve the final shell command: the template's own command plus the
+-- common free-form `extra_args` (appended verbatim). Every call site that
+-- needs the runnable command — the editor preview, apply_ctx, new_config —
+-- goes through here so the two pieces never drift apart.
+function M.full_command(cfg)
+  local tpl = M.build_get(cfg.template_id)
+  if not tpl then return cfg.command or "" end
+  local base  = tpl.build_command(cfg)
+  local extra = cfg.extra_args or ""
+  if extra ~= "" then return base .. " " .. extra end
+  return base
+end
+
 -- Resolve a config's effective env layered as:
 --   base env  →  template-derived env  →  active-profile overrides
 -- Where each later layer wins. Caller passes `active_profile` (string) —
@@ -607,10 +634,11 @@ function M.apply_ctx(cfg, ctx)
     if tcid ~= nil then cfg.toolchain_id = tcid end
   end
 
-  -- Common: description, notify_on_completion, before_launch.
+  -- Common: description, notify_on_completion, extra_args, before_launch.
   local desc = v("description"); if desc ~= nil then cfg.description = desc end
   local notify = v("notify_on_completion")
   if notify ~= nil then cfg.notify_on_completion = notify and true or false end
+  local ea = v("extra_args"); if ea ~= nil then cfg.extra_args = ea end
   local bl = v("before_launch")
   if bl ~= nil then
     -- Strip rows where both target and step type are blank — empty
@@ -650,7 +678,7 @@ function M.apply_ctx(cfg, ctx)
     end
   end
 
-  cfg.command = tpl.build_command(cfg)
+  cfg.command = M.full_command(cfg)
   return cfg
 end
 
@@ -669,7 +697,7 @@ function M.new_config(template_id)
   }
   for k, v in pairs(common_defaults())   do cfg[k] = v end
   for k, v in pairs(tpl.new_defaults())  do cfg[k] = v end
-  cfg.command = tpl.build_command(cfg)
+  cfg.command = M.full_command(cfg)
   return cfg
 end
 
