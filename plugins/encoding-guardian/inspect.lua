@@ -46,13 +46,59 @@ function M.is_valid_utf8(content)
   return utf8.len(content) ~= nil
 end
 
+-- ── windows-1252 (CP1252) validity ───────────────────────────────────────
+-- CP1252 assigns every byte except five undefined positions
+-- (0x81, 0x8D, 0x8F, 0x90, 0x9D). A file is "invalid windows-1252" only if
+-- it carries one of those — same shape as the UTF-8 check, different
+-- alphabet. The char-class find runs in C, so it stays cheap on big files.
+function M.is_valid_cp1252(content)
+  return content:find("[\x81\x8d\x8f\x90\x9d]") == nil
+end
+
+-- Locate the undefined CP1252 bytes with line/column, capped at `limit`.
+-- The cheap `find` gate above means the byte loop only runs on files that
+-- actually carry an offender — clean files never pay for it.
+function M.cp1252_offenders(content, limit)
+  limit = limit or 12
+  if M.is_valid_cp1252(content) then return {} end
+  local out = {}
+  local line, col = 1, 1
+  for i = 1, #content do
+    local b = string.byte(content, i)
+    if b == 0x0A then
+      line, col = line + 1, 1
+    else
+      if b == 0x81 or b == 0x8D or b == 0x8F or b == 0x90 or b == 0x9D then
+        out[#out + 1] = { line = line, col = col, byte = b }
+        if #out >= limit then break end
+      end
+      col = col + 1
+    end
+  end
+  return out
+end
+
+-- "0x90 @L3:C12 · 0x81 @L7:C4 (+more)" — compact, but every entry carries
+-- the byte and its line/column so the user can jump straight to it.
+local function format_cp1252_offenders(offenders, total_hint)
+  local parts = {}
+  for _, o in ipairs(offenders) do
+    parts[#parts + 1] = string.format("0x%02X @L%d:C%d", o.byte, o.line, o.col)
+  end
+  local more = total_hint and total_hint > #offenders
+  return table.concat(parts, " · ") .. (more and " (+more)" or "")
+end
+
 -- ── Per-file aggregate ─────────────────────────────────────────────────────
 
 -- Runs every check the project configuration asks for. Returns nil when
 -- the file is clean, otherwise `{ path, problems = { "..." } }` with
 -- one human-readable string per failing check.
 function M.inspect_file(rel_path, full_path, cfg)
-  local content, read_err = arbor.fs.read(full_path)
+  -- read_bytes (not read): the whole point is inspecting non-UTF-8 / BOM'd
+  -- files. `read` would reject invalid UTF-8 and strip the BOM before we
+  -- ever see it.
+  local content, read_err = arbor.fs.read_bytes(full_path)
   if not content then
     return { path = rel_path, problems = { "read failed: " .. tostring(read_err) } }
   end
@@ -73,12 +119,19 @@ function M.inspect_file(rel_path, full_path, cfg)
     end
   end
 
-  if cfg.block_charset and cfg.default_charset == "utf-8" then
-    if not M.is_valid_utf8(content) then
-      flag("invalid UTF-8 byte sequence")
-    end
-    if M.has_utf16_bom(content) then
-      flag("UTF-16 BOM detected (project declares UTF-8)")
+  if cfg.block_charset then
+    if cfg.default_charset == "utf-8" then
+      if not M.is_valid_utf8(content) then
+        flag("invalid UTF-8 byte sequence")
+      end
+      if M.has_utf16_bom(content) then
+        flag("UTF-16 BOM detected (project declares UTF-8)")
+      end
+    elseif cfg.default_charset == "windows-1252" then
+      local offenders = M.cp1252_offenders(content, 12)
+      if #offenders > 0 then
+        flag("windows-1252: " .. format_cp1252_offenders(offenders, #offenders >= 12 and 13 or nil))
+      end
     end
   end
 

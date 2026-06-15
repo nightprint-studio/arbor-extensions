@@ -20,19 +20,30 @@
   <li>
     The hook is <strong>opt-in per project</strong>. New repos default
     to disabled — toggle <em>Enable pre-commit encoding check</em> in
-    the gear-icon settings.
+    the Command Palette: <strong>Encoding Guardian: Project settings</strong>.
   </li>
   <li>
-    A global kill switch (<em>Master kill switch</em>) sits above the
-    per-project flag — turning it off disables the hook everywhere.
+    A global kill switch (<em>Master kill switch</em>) lives in the
+    Plugin Manager gear-icon settings — turning it off disables the hook
+    everywhere, regardless of any per-project flag.
   </li>
 </ul>
 
 <h2>Command Palette</h2>
 <ul>
   <li>
+    <strong>Encoding Guardian: Project settings</strong> — per-repository
+    encoding contract for the active repo: enable the pre-commit check,
+    pick the charset and line ending, choose which checks block, and tune
+    the scan scope. These are scoped to the open repo, which is why they
+    live here rather than in the (global) gear-icon settings.
+  </li>
+  <li>
     <strong>Encoding Guardian: Scan project</strong> — manual scan that
-    paints a result modal with the file list and per-file issues.
+    shows a progress card while it walks the tree, then a result modal with
+    summary counters, the file list and per-file issues. The modal also
+    states the effective per-project contract (charset / EOL) the scan ran
+    with, so it's clear which settings produced the verdict.
   </li>
   <li>
     <strong>Encoding Guardian: Fix mojibake</strong> — auto-repairs every
@@ -53,7 +64,13 @@
   <li>
     <strong>Charset</strong> — when the project is declared
     <code>utf-8</code>, any file containing invalid UTF-8 sequences (or a
-    UTF-16 BOM) is flagged.
+    UTF-16 BOM) is flagged. When it's declared <code>windows-1252</code>,
+    files carrying a byte undefined in CP1252 (<code>0x81</code>,
+    <code>0x8D</code>, <code>0x8F</code>, <code>0x90</code>,
+    <code>0x9D</code>) are flagged, each offender listed with its byte and
+    line:column. Single-byte charsets that map every byte
+    (<code>latin1</code>) have nothing to validate here. Files are read as
+    raw bytes, so non-UTF-8 content is inspected rather than skipped.
   </li>
   <li>
     <strong>BOM</strong> — UTF-8 BOM presence is checked against the

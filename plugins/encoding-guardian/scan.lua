@@ -104,17 +104,26 @@ local function inspect_each(files, cfg)
 end
 
 -- Scan the entire working tree (manual scan / fix flow). Returns
---   `(result, nil)` on success — `result = { scanned, hits, truncated }`,
+--   `(result, nil)` on success — `result = { scanned, hits, truncated,
+--                                            charset, eol }`,
 --   `(nil, err)`    when no repo is open.
-function M.run()
+-- `opts.on_step("walk" | "inspect")` is an optional progress hook so the
+-- caller can drive a visible operation card while the (synchronous) walk
+-- and inspection run.
+function M.run(opts)
+  local on_step = (opts and opts.on_step) or function() end
   local repo = arbor.repo.current()
   if not repo then return nil, "no active repository" end
   local cfg   = settings.scan_config()
+  on_step("walk")
   local files = collect_files(repo, cfg)
+  on_step("inspect")
   return {
     scanned   = #files,
     hits      = inspect_each(files, cfg),
     truncated = #files >= cfg.max_files,
+    charset   = cfg.default_charset,
+    eol       = cfg.default_eol,
   }, nil
 end
 

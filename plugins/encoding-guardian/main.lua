@@ -10,15 +10,17 @@
 --   scan.lua              - directory walk + scan_project orchestration
 --   precommit.lua         - on_pre_commit veto handler
 --   commands.lua          - Command Palette scan/fix entries + result modal
---   settings_panel.lua    - gear-icon settings UI
+--   global_settings.lua   - gear-icon panel (Plugin Manager) - global only
+--   project_settings.lua  - Command Palette per-repo encoding contract
 --   editorconfig/parser.lua  - parse + serialise .editorconfig
 --   editorconfig/studio.lua  - tree-on-left + form-on-right editor modal
 --
 -- See doc.html for the user-facing tour.
 
-local commands       = require("commands")
-local precommit      = require("precommit")
-local settings_panel = require("settings_panel")
+local commands         = require("commands")
+local precommit        = require("precommit")
+local global_settings  = require("global_settings")
+local project_settings = require("project_settings")
 -- editorconfig.studio: temporarily disabled. The form-DSL primitives
 -- available to plugins today aren't enough to reach the polish bar of
 -- the host-side TOML / JSON / YAML studio modals (denser inspector
@@ -28,7 +30,8 @@ local settings_panel = require("settings_panel")
 -- local studio = require("editorconfig.studio")
 
 arbor.events.on("on_plugin_load", function(ctx)
-  settings_panel.register()
+  global_settings.register()
+  project_settings.register()
   commands.register()
   -- studio.register()    -- see disabled require above
   precommit.register()
