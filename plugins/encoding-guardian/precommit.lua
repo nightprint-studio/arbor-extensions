@@ -1,4 +1,4 @@
--- precommit.lua — `on_pre_commit` veto handler.
+-- precommit.lua — `corvus:pre_commit` veto handler.
 --
 -- The hook is OPT-IN per project: nothing happens unless the user has
 -- ticked "Enable pre-commit encoding check" for the active repo. When it
@@ -32,7 +32,7 @@ end
 
 -- Register the veto handler. Called once from main.lua.
 function M.register()
-  arbor.events.on("on_pre_commit", function(_ctx)
+  arbor.events.on("corvus:pre_commit", function(_ctx)
     if not settings.precommit_enabled_for_project() then return end
 
     -- Scope the check to the staged set — that's the actual content the

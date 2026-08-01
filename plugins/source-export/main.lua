@@ -36,7 +36,7 @@ local state = { current_repo = "" }
 
 -- Snapshot of every profile we've ever registered as a stub, keyed by
 -- def id (e.g. "profile:cfg_xyz"). Populated by `register_profile_stubs`
--- on every repo activation, READ by `on_pipeline_run_request` so the
+-- on every repo activation, READ by `pipeline:run_request` so the
 -- handler can recover the source repo + profile data even when the user
 -- has switched tabs after registration.
 --
@@ -50,7 +50,7 @@ local stub_index = {}
 -- Lifecycle
 -- ─────────────────────────────────────────────────────────────────────────────
 
-arbor.events.on("on_plugin_load", function(ctx)
+arbor.events.on("arbor:plugin_load", function(ctx)
   combo.register()
   -- Register the plugin-settings panel up-front so the gear icon in the
   -- Plugin Manager appears for source-export. The panel is the ONLY entry
@@ -122,7 +122,7 @@ local function register_profile_stubs()
       })
     end)
     -- Remember which repo this def belongs to + a snapshot of the profile.
-    -- Used by `on_pipeline_run_request` so a Play click works even if the
+    -- Used by `pipeline:run_request` so a Play click works even if the
     -- user has switched to a different tab since registration.
     stub_index[def_id] = { repo = repo, profile = p }
   end
@@ -135,11 +135,11 @@ local function on_repo_activated(path)
   register_profile_stubs()
 end
 
-arbor.events.on("on_repo_open", function(ctx)
+arbor.events.on("arbor:repo_open", function(ctx)
   on_repo_activated(ctx.path or ctx.repo or "")
 end)
 
-arbor.events.on("on_tab_switch", function(ctx)
+arbor.events.on("arbor:tab_switch", function(ctx)
   on_repo_activated(ctx.path or "")
 end)
 
@@ -195,7 +195,7 @@ end)
 -- from every repo opened since app start, so we keep an in-memory
 -- `stub_index` snapshot to handle "Play on a def whose origin tab the user
 -- is no longer viewing".
-arbor.events.on("on_pipeline_run_request", function(ctx)
+arbor.events.on("pipeline:run_request", function(ctx)
   local def_id = ctx.pipeline_id or ""
   if def_id:sub(1, 8) ~= "profile:" then return end
   local profile_id = def_id:sub(9)
@@ -1236,7 +1236,7 @@ local function enforce_keep_last_n(pipeline_id)
   end
 end
 
-arbor.events.on("on_pipeline_done", function(ctx)
+arbor.events.on("pipeline:done", function(ctx)
   if not is_our_plugin(ctx) then return end
   enforce_keep_last_n(ctx.pipeline_id)
   -- Release libgit2 handles once more at the end: the UI may have touched
@@ -1261,7 +1261,7 @@ arbor.events.on("on_pipeline_done", function(ctx)
   end)
 end)
 
-arbor.events.on("on_pipeline_started", function(ctx)
+arbor.events.on("pipeline:started", function(ctx)
   if not is_our_plugin(ctx) then return end
   local pid = profile_id_from_pipeline_id(ctx.pipeline_id)
   if pid and modal.state.selected_profile_id == pid then

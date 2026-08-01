@@ -25,7 +25,7 @@ local TIMER_MS  = 1500
 local CATEGORY  = "Services"
 local PANEL_ID  = "services"
 
--- Cached cancel handle for the polling timer so on_plugin_unload can stop
+-- Cached cancel handle for the polling timer so arbor:plugin_unload can stop
 -- the background thread (otherwise it keeps firing the hook into a Lua VM
 -- that's about to be torn down).
 local refresh_timer = nil
@@ -212,7 +212,7 @@ end
 
 -- ── Lifecycle ────────────────────────────────────────────────────────────────
 
-arbor.events.on("on_plugin_load", function(_ctx)
+arbor.events.on("arbor:plugin_load", function(_ctx)
   arbor.ui.add_sidebar({
     id       = PANEL_ID,
     icon     = "Server",
@@ -235,7 +235,7 @@ arbor.events.on("on_plugin_load", function(_ctx)
   arbor.log.info("ready (timer=" .. TIMER_MS .. "ms)")
 end)
 
-arbor.events.on("on_plugin_unload", function(_ctx)
+arbor.events.on("arbor:plugin_unload", function(_ctx)
   if refresh_timer then
     pcall(function() arbor.timer.cancel(refresh_timer) end)
     refresh_timer = nil

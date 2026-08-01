@@ -62,7 +62,7 @@ arbor.events.on("yaml-studio:on_pasted", function(ctx)
   arbor.yaml_studio.open({ text = text, title = title })
 end)
 
-arbor.events.on("on_plugin_load", function(_ctx)
+arbor.events.on("arbor:plugin_load", function(_ctx)
   arbor.command.register({
     id          = "open-file",
     title       = "Open YAML file in Studio…",

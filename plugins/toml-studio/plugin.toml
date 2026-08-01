@@ -14,4 +14,4 @@ experimental = true
 fs = "read"
 
 [hooks]
-on_plugin_load = true
+"arbor:plugin_load" = true

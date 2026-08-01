@@ -1,7 +1,7 @@
 -- ui/settings.lua — plugin-global settings panel.
 --
 -- The panel is registered via `arbor.ui.settings.panel(...)` from main.lua's
--- on_plugin_load — that registration alone is what surfaces the gear icon
+-- arbor:plugin_load — that registration alone is what surfaces the gear icon
 -- next to the plugin row in the Plugin Manager (the only entry point for
 -- plugin-wide settings; the toolbar combo only deals with per-repo profiles).
 --

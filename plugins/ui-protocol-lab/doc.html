@@ -32,7 +32,7 @@
 <p>The same protocol also drives a <strong>body surface</strong>, not just modals. This plugin registers a view with <code>arbor.ui.add_view</code> — open it from the <strong>UI&nbsp;Lab&nbsp;Dashboard</strong> icon in the left activity bar, the Command Palette (<em>Open View: UI Lab Dashboard</em>), or <kbd>Alt+Shift+V</kbd>.</p>
 <ul>
   <li><strong>Same renderer</strong> — the view body is the full <code>FormNodeRenderer</code>, so sections, editor, buttons and the dispatch / scoped / patch protocol all work exactly as in the modal.</li>
-  <li><strong><code>on_view_open</code> / <code>on_view_close</code></strong> — the plugin fills the body from <code>on_view_open</code> with <code>arbor.ui.set_panel_content</code> and logs the close.</li>
+  <li><strong><code>arbor:view_open</code> / <code>arbor:view_close</code></strong> — the plugin fills the body from <code>arbor:view_open</code> with <code>arbor.ui.set_panel_content</code> and logs the close.</li>
   <li><strong>Live patch in the body</strong> — <em>Tick</em> updates a label + banner via a single <code>arbor.ui.form.patch</code> (no re-mount); the in-body editor fires a scoped <code>on_edit</code> just like the modal. View node ids are distinct from the modal's, so the shared patch channel never cross-talks.</li>
   <li><strong>Placement</strong> — registered as <code>placement = "graph"</code> (keeps the tab bar + bottom panel); switch it to <code>"main"</code> in <code>main.lua</code> to take over the whole body.</li>
 </ul>

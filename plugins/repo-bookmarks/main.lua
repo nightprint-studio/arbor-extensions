@@ -288,7 +288,7 @@ end)
 -- Wiring
 -- ─────────────────────────────────────────────────────────────────────────
 
-arbor.events.on("on_plugin_load", function(_ctx)
+arbor.events.on("arbor:plugin_load", function(_ctx)
   arbor.command.register({
     id          = "add",
     title       = "Bookmark a file…",

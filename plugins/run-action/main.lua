@@ -116,7 +116,7 @@ local do_run
 
 -- ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-arbor.events.on("on_plugin_load", function(ctx)
+arbor.events.on("arbor:plugin_load", function(ctx)
   run_combo.register()
 
   -- Register the built-in ops we actually use for the Tomcat deploy
@@ -356,7 +356,7 @@ end)
 -- Tomcat deploy pipeline bookkeeping: route PIPELINE_DONE events for runs
 -- we started through the deploy module (it spawns catalina on success or
 -- raises a notification on failure).
-arbor.events.on("on_pipeline_done", function(ctx)
+arbor.events.on("pipeline:done", function(ctx)
   if ctx.plugin ~= "run-action" then return end
   require("tomcat_pipeline").on_pipeline_done(ctx)
 end)
@@ -595,11 +595,11 @@ function contribute_runconfigs_section(repo_path, selected_id)
   })
 end
 
-arbor.events.on("on_repo_open", function(ctx)
+arbor.events.on("arbor:repo_open", function(ctx)
   on_repo_activated(ctx.path or ctx.repo or "")
 end)
 
-arbor.events.on("on_tab_switch", function(ctx)
+arbor.events.on("arbor:tab_switch", function(ctx)
   on_repo_activated(ctx.path or "")
 end)
 
@@ -639,7 +639,7 @@ end
 -- Build → Preflight → Clean → Deploy pipeline. Notifications: a single
 -- transient toast at the start (no bell entry — that's the START phase
 -- the user already sees in the pipelines panel); success/failure ends
--- up in the bell only via on_pipeline_done.
+-- up in the bell only via pipeline:done.
 local function start_tomcat_pipeline(run_cfg, repo_path, build_cfg, build_env, build_command, build_cwd, build_label)
   local cfg_id      = run_cfg.id
   local repo_folder = repo_path:match("[/\\]([^/\\]+)[/\\]?$") or cfg_id
@@ -1093,7 +1093,7 @@ end)
 -- attached build cfg via compile-action.resolve_build, releases libgit2
 -- handles, etc.) so the panel's Play behaves identically to clicking the
 -- combo button.
-arbor.events.on("on_pipeline_run_request", function(ctx)
+arbor.events.on("pipeline:run_request", function(ctx)
   local def_id = ctx.pipeline_id or ""
   if def_id:sub(1, 14) ~= "tomcat-deploy:" then return end
   local cfg_id = def_id:sub(15)

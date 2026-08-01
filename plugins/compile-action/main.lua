@@ -36,7 +36,7 @@ end
 
 -- ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-arbor.events.on("on_plugin_load", function(ctx)
+arbor.events.on("arbor:plugin_load", function(ctx)
   combo.register()
 
   -- New: register the IntelliJ-style "Build & Run" tree sidebar + declare
@@ -146,11 +146,11 @@ local function on_repo_activated(path)
   arbor.ui.set_combo_options{ id = "active-profile", options = PROFILES, selected = prof }
 end
 
-arbor.events.on("on_repo_open", function(ctx)
+arbor.events.on("arbor:repo_open", function(ctx)
   on_repo_activated(ctx.path or ctx.repo or "")
 end)
 
-arbor.events.on("on_tab_switch", function(ctx)
+arbor.events.on("arbor:tab_switch", function(ctx)
   on_repo_activated(ctx.path or "")
 end)
 

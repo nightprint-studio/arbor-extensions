@@ -4,10 +4,10 @@
 -- extra rules (ticket key, subject length, body line wrap). Runs in two
 -- modes:
 --
---   · STRICT  (default) → on_pre_commit returns a reason string and the
+--   · STRICT  (default) → corvus:pre_commit returns a reason string and the
 --                          host aborts the commit before it's created.
---   · LENIENT (strict=false) → on_pre_commit allows the commit through;
---                              we still surface the warning via on_commit
+--   · LENIENT (strict=false) → corvus:pre_commit allows the commit through;
+--                              we still surface the warning via corvus:commit
 --                              after the fact.
 --
 -- Settings (global):
@@ -174,7 +174,7 @@ end
 -- Lifecycle
 -- ─────────────────────────────────────────────────────────────────────────
 
-arbor.events.on("on_plugin_load", function(ctx)
+arbor.events.on("arbor:plugin_load", function(ctx)
   -- Register the plugin-settings panel up-front. The registration is
   -- what surfaces the gear icon next to the plugin row in the Plugin
   -- Manager — without it there is no entry point for plugin-wide
@@ -202,11 +202,11 @@ end)
 -- Hooks
 -- ─────────────────────────────────────────────────────────────────────────
 
--- Strict mode → return the error string from on_pre_commit so the host
+-- Strict mode → return the error string from corvus:pre_commit so the host
 -- aborts the commit (see `commit()` in stage_commands.rs which calls
--- host.collect_veto). Lenient mode → fall through to on_commit and surface
+-- host.collect_veto). Lenient mode → fall through to corvus:commit and surface
 -- the failure via a warning toast after the fact.
-arbor.events.on("on_pre_commit", function(ctx)
+arbor.events.on("corvus:pre_commit", function(ctx)
   if get_bool("enabled", true) == false then return end
   if get_bool("strict",  true)  == false then return end
 
@@ -217,7 +217,7 @@ arbor.events.on("on_pre_commit", function(ctx)
   return "commit-validator rejected the message:\n" .. err
 end)
 
-arbor.events.on("on_commit", function(ctx)
+arbor.events.on("corvus:commit", function(ctx)
   if get_bool("enabled", true) == false then return end
 
   local msg = ctx.message or ""
@@ -228,7 +228,7 @@ arbor.events.on("on_commit", function(ctx)
     return
   end
 
-  -- Reaching here in strict mode would mean on_pre_commit somehow let an
+  -- Reaching here in strict mode would mean corvus:pre_commit somehow let an
   -- invalid commit through (e.g. plugin reloaded between the two hooks).
   -- We still surface the issue so the user can amend.
   local strict = get_bool("strict", true)
@@ -269,7 +269,7 @@ end)
 -- ─────────────────────────────────────────────────────────────────────────
 --
 -- We contribute one category and four sections to the panel registered
--- in on_plugin_load. Sections use `card = true` so each group gets a
+-- in arbor:plugin_load. Sections use `card = true` so each group gets a
 -- visually-grouped card with its own border — without that the panel
 -- looks like an undifferentiated list of inputs and feels "flat".
 -- on_save fires once for the whole panel; we read every namespaced
@@ -306,7 +306,7 @@ local function settings_refresh()
           label   = "Enable validation",
           default = get_bool("enabled", true) },
         { type = "checkbox", name = "strict",
-          label   = "Strict mode — block invalid commits via on_pre_commit",
+          label   = "Strict mode — block invalid commits via corvus:pre_commit",
           default = get_bool("strict", true),
           hint    = "When off, the validator only shows a post-commit warning." },
       },

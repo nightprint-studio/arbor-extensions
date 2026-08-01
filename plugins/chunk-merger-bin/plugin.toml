@@ -23,9 +23,9 @@ fs_scope = ["*"]
 service_export = true
 
 [hooks]
-on_plugin_load = true
-on_repo_open   = false
-on_tab_switch  = false
+"arbor:plugin_load" = true
+"arbor:repo_open"   = false
+"arbor:tab_switch"  = false
 
 # Hard-required: this plugin only exposes the `chunk-merger-bin.merge` service
 # that cloud-storage's chunks.lua calls into. Without cloud-storage there's no

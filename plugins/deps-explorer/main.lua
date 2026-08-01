@@ -47,7 +47,7 @@ local contribute_maintenance_section
 
 -- ── Lifecycle ────────────────────────────────────────────────────────────────
 
-arbor.events.on("on_plugin_load", function(_ctx)
+arbor.events.on("arbor:plugin_load", function(_ctx)
   -- One context-menu entry per supported toolchain. We could collapse them
   -- into a single entry with template-aware dispatch, but per-toolchain
   -- entries make the `when` clauses self-documenting and the priority easy
@@ -98,14 +98,14 @@ arbor.events.on("on_plugin_load", function(_ctx)
   arbor.log.info("ready — Analyze dependencies wired into compile sidebar")
 end)
 
--- ── on_repo_deregistered: prune per-repo tree-cache entries ─────────────────
+-- ── corvus:repo_deregistered: prune per-repo tree-cache entries ─────────────────
 -- The host fires this when a repo is permanently removed from Arbor (full
 -- registry delete, removed from its last workspace, or last tab closed while
 -- already orphaned). The registry caches (Maven Central / npm / crates.io)
 -- are keyed by package name so they aren't repo-specific and stay put — we
 -- only flush the dependency-tree snapshots whose module dir lived inside
 -- the removed repo path.
-arbor.events.on("on_repo_deregistered", function(ctx)
+arbor.events.on("corvus:repo_deregistered", function(ctx)
   local path = ctx and ctx.path or ""
   if path == "" then return end
   local removed = 0

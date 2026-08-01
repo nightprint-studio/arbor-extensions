@@ -184,7 +184,7 @@ end)
 
 -- ─── wiring ──────────────────────────────────────────────────────────────
 
-arbor.events.on("on_plugin_load", function(_)
+arbor.events.on("arbor:plugin_load", function(_)
   load_algos()
   arbor.command.register({
     id          = "open",

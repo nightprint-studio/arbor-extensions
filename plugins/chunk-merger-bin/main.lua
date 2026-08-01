@@ -11,7 +11,7 @@
 -- Not suitable for content-aware merges (zip catalog rewriting, video
 -- container muxing, etc.) — those need a dedicated handler.
 
-arbor.events.on("on_plugin_load", function(_ctx)
+arbor.events.on("arbor:plugin_load", function(_ctx)
   -- Contribution payload follows the schema documented in the cloud-storage
   -- plugin doc: the cloud-storage sidebar reads `label`, `icon`, `service`
   -- to decide what to show in the chunk-handler picker and which service

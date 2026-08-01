@@ -149,7 +149,7 @@ function M.invalidate_all()
 end
 
 -- Drop every cache entry whose embedded module dir is `path_prefix` itself
--- or any descendant directory of it. Used by the `on_repo_deregistered`
+-- or any descendant directory of it. Used by the `corvus:repo_deregistered`
 -- plugin hook to wipe a repo's tree-cache entries when it's removed from
 -- Arbor (registry deletion, last-workspace removal, or tab close on an
 -- orphan). Returns the number of entries removed so callers can log /

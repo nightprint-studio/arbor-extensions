@@ -21,6 +21,6 @@ fs_scope = ["*"]              # User picks paths via the native picker — can b
 service_call = true
 
 [hooks]
-on_plugin_load = true
-on_repo_open   = false        # Cloud connections are global, not per-repo.
-on_tab_switch  = false
+"arbor:plugin_load" = true
+"arbor:repo_open"   = false   # Cloud connections are global, not per-repo.
+"arbor:tab_switch"  = false

@@ -21,7 +21,7 @@ function M.set_hide_services(v) M.hide_services = v and true or false end
 -- via arbor.service.call when it loads/unloads. But that call is async (it
 -- spawns a thread that waits for the plugin_host mutex held by the reload
 -- loop), so there are three drift windows where the flag lies:
---   1. App startup: run-monitor's on_plugin_load fires before its
+--   1. App startup: run-monitor's arbor:plugin_load fires before its
 --      service.call thread has gotten the lock → flag still false.
 --   2. Mid-session reload of run-action only: our state module re-evaluates,
 --      M.hide_services drops back to false, but run-monitor isn't notified

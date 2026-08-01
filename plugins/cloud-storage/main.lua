@@ -1,7 +1,7 @@
 -- main.lua — cloud-storage plugin entry point.
 --
 -- Thin event wiring:
---   · on_plugin_load → register sidebar + listen for progress / oauth events.
+--   · arbor:plugin_load → register sidebar + listen for progress / oauth events.
 --   · Sidebar/toolbar/tree events → orchestrate via sidebar.lua / config_form.lua /
 --     transfer.lua / arbor.cloud.* calls.
 
@@ -117,7 +117,7 @@ local function register_context_menu()
   })
 end
 
-arbor.events.on("on_plugin_load", function(ctx)
+arbor.events.on("arbor:plugin_load", function(ctx)
   -- Pure registration only — no fetches, no fire_hook_on cascades.
   sidebar.register()
   register_context_menu()

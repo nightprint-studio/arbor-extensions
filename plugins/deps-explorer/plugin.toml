@@ -25,9 +25,9 @@ name    = "compile-action"
 version = ">=1.0.0"
 
 [hooks]
-on_plugin_load       = true
+"arbor:plugin_load"        = true
 # Fired when a repo is permanently removed from Arbor (deregistered, last
 # workspace removed, or last tab closed while orphaned). We use it to drop
 # the per-module dependency-tree cache entries belonging to that repo —
 # everything else (registry caches, etc.) stays since it's keyed by package.
-on_repo_deregistered = true
+"corvus:repo_deregistered" = true

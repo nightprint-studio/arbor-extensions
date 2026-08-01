@@ -15,7 +15,7 @@ experimental = true
 command_invoke = true
 
 [hooks]
-on_plugin_load = true
+"arbor:plugin_load" = true
 # Fired on this plugin when its add_view view opens / closes.
-on_view_open  = true
-on_view_close = true
+"arbor:view_open"   = true
+"arbor:view_close"  = true

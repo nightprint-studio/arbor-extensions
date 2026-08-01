@@ -5,15 +5,15 @@
   Commits</a> specification plus a small set of optional rules
   (ticket reference, subject length, body wrap). In strict mode the
   plugin <strong>blocks</strong> the commit before it is created via
-  the <code>on_pre_commit</code> hook; in lenient mode it surfaces
+  the <code>corvus:pre_commit</code> hook; in lenient mode it surfaces
   the issues as a post-commit warning.
 </p>
 
 <h2>How it runs</h2>
 <ul>
-  <li><code>on_pre_commit</code> — strict mode only. Returns the
+  <li><code>corvus:pre_commit</code> — strict mode only. Returns the
       validation error string and the host aborts the commit.</li>
-  <li><code>on_commit</code> — runs after every successful commit. In
+  <li><code>corvus:commit</code> — runs after every successful commit. In
       strict mode it shows a quiet success toast; in lenient mode it
       shows a warning when the message has issues.</li>
   <li>Right-click any commit in the graph and pick
@@ -52,7 +52,7 @@
   <tbody>
     <tr><td>Enable validation</td><td>✓ on</td><td>Master switch.</td></tr>
     <tr><td>Strict mode</td><td>✓ on</td><td>When on, returning a
-        non-empty string from <code>on_pre_commit</code> aborts the
+        non-empty string from <code>corvus:pre_commit</code> aborts the
         commit. When off, the commit is allowed and a warning toast
         is shown afterwards.</td></tr>
     <tr><td>Additional types</td><td>(empty)</td><td>Comma-separated

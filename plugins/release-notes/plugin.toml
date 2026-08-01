@@ -22,4 +22,4 @@ fs_scope = ["*"]
 issues   = "read"
 
 [hooks]
-on_plugin_load = true
+"arbor:plugin_load" = true

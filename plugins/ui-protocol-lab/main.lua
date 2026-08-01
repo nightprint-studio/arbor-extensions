@@ -10,7 +10,7 @@
 --             swapped live with a patch (merge) — never re-mounted.
 --             The `view` (arbor.ui.add_view): a main-area body surface rendering
 --             the SAME FormNodeRenderer — opened from the activity bar / palette
---             / Alt+Shift+V, populated on on_view_open, updated live via the
+--             / Alt+Shift+V, populated on arbor:view_open, updated live via the
 --             same form.patch channel (ids distinct from the modal's).
 --   Fase 3  — granular, no-remount updates: arbor.ui.form.patch (verbs
 --             merge / set / append / remove) and arbor.ui.form.set_state_path.
@@ -397,7 +397,7 @@ end)
 --
 -- A view occupies the body (where the commit graph lives) and renders the FULL
 -- FormNodeRenderer — so the dispatch / scoped / patch protocol works exactly as
--- in the modal. We populate it on `on_view_open` with `set_panel_content`, then
+-- in the modal. We populate it on `arbor:view_open` with `set_panel_content`, then
 -- update it live with `arbor.ui.form.patch`. Its node ids are distinct from the
 -- modal's, so the shared (plugin-scoped) patch channel never cross-talks even
 -- if both the modal and the view are open at once.
@@ -439,14 +439,14 @@ local function view_content()
   }
 end
 
-arbor.events.on("on_view_open", function(ctx)
+arbor.events.on("arbor:view_open", function(ctx)
   if not (ctx and ctx.view_id == VIEW_ID) then return end
   view_ticks = 0
   arbor.ui.set_panel_content(VIEW_ID, view_content())
   arbor.log.info("view opened: " .. VIEW_ID)
 end)
 
-arbor.events.on("on_view_close", function(ctx)
+arbor.events.on("arbor:view_close", function(ctx)
   if ctx and ctx.view_id == VIEW_ID then
     arbor.log.info("view closed: " .. VIEW_ID)
   end
@@ -521,7 +521,7 @@ end)
 
 arbor.events.on("command:open", function(_) open_playground() end)
 
-arbor.events.on("on_plugin_load", function(_)
+arbor.events.on("arbor:plugin_load", function(_)
   arbor.command.register({
     id          = "open",
     title       = "UI Lab: open playground",

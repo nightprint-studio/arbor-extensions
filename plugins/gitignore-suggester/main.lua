@@ -297,7 +297,7 @@ end)
 -- Wiring
 -- ─────────────────────────────────────────────────────────────────────────
 
-arbor.events.on("on_plugin_load", function(_ctx)
+arbor.events.on("arbor:plugin_load", function(_ctx)
   arbor.command.register({
     id          = "open_modal",
     title       = "Suggest .gitignore entries",
@@ -329,5 +329,5 @@ end)
 -- the user removes the palette command in a future iteration.
 arbor.events.on("gitignore-suggester:open_modal", function(_) open_modal() end)
 
-arbor.events.on("on_repo_open",  function(_ctx) silent_scan() end)
-arbor.events.on("on_tab_switch", function(_ctx) silent_scan() end)
+arbor.events.on("arbor:repo_open",  function(_ctx) silent_scan() end)
+arbor.events.on("arbor:tab_switch", function(_ctx) silent_scan() end)

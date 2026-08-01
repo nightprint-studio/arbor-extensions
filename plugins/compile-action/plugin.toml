@@ -26,6 +26,6 @@ service_export = true
 service_call   = true
 
 [hooks]
-on_plugin_load = true
-on_repo_open   = true
-on_tab_switch  = true
+"arbor:plugin_load" = true
+"arbor:repo_open"   = true
+"arbor:tab_switch"  = true

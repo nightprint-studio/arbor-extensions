@@ -14,6 +14,6 @@ git = "read"
 # Settings UI pending migration to `arbor.ui.settings.panel(...)`.
 
 [hooks]
-on_plugin_load = true
-on_pre_commit  = true
-on_commit      = true
+"arbor:plugin_load" = true
+"corvus:pre_commit" = true
+"corvus:commit"     = true

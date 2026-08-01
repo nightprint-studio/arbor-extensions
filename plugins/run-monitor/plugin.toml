@@ -15,8 +15,8 @@ doc_file    = "doc.html"
 service_call = true
 
 [hooks]
-on_plugin_load   = true
-on_plugin_unload = true
+"arbor:plugin_load"   = true
+"arbor:plugin_unload" = true
 
 # We need run-action to expose the toggle service. Optional so we still load
 # (with a no-op claim attempt) when the user has run-action disabled.

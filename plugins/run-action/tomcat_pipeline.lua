@@ -11,7 +11,7 @@
 -- separate Job before kicking off the deploy) gives the user one unified
 -- progress timeline and lets resume/cancel work across both phases.
 -- Catalina itself is NOT a pipeline stage — it's a never-ending service
--- spawned via arbor.job.spawn from on_pipeline_done, which would fight
+-- spawned via arbor.job.spawn from pipeline:done, which would fight
 -- the orchestrator's "every step must terminate" contract.
 
 local state = require("state")
@@ -176,7 +176,7 @@ function M.deploy(args)
   return run_id
 end
 
--- Hooked to "on_pipeline_done" by main.lua. Ignores every run that wasn't
+-- Hooked to "pipeline:done" by main.lua. Ignores every run that wasn't
 -- started by this module. On success → spawn catalina; on failure → leave
 -- the run resumable from the Pipelines panel. The host already emits the
 -- pipeline started/succeeded/failed notifications, so we only surface

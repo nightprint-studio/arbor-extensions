@@ -8,7 +8,7 @@
 --   mojibake.lua          - patterns + detect + fix
 --   inspect.lua           - per-file BOM/EOL/UTF-8/mojibake checks
 --   scan.lua              - directory walk + scan_project orchestration
---   precommit.lua         - on_pre_commit veto handler
+--   precommit.lua         - corvus:pre_commit veto handler
 --   commands.lua          - Command Palette scan/fix entries + result modal
 --   global_settings.lua   - gear-icon panel (Plugin Manager) - global only
 --   project_settings.lua  - Command Palette per-repo encoding contract
@@ -29,7 +29,7 @@ local project_settings = require("project_settings")
 -- "what plugins can / can't render".
 -- local studio = require("editorconfig.studio")
 
-arbor.events.on("on_plugin_load", function(ctx)
+arbor.events.on("arbor:plugin_load", function(ctx)
   global_settings.register()
   project_settings.register()
   commands.register()
