@@ -1,0 +1,92 @@
+// What Arbor offers a guest.
+//
+// The rule this file exists to hold: a guest gets a **narrow, named capability**, never a
+// general one. There is no `wasi:http` here and no sockets. A guest that wants to reach a
+// bucket asks the host to perform a request; the host is the one holding the credential,
+// checking it against the `[permissions] network` allowlist the user consented to, and
+// speaking TLS.
+//
+// That is not extra ceremony for its own sake. A plugin may only touch the credential slots
+// its manifest declared, and the only shape in which that rule can be *enforced* rather than
+// *asked for* is the one where the host makes the call. Give the guest a socket and the token
+// is in the guest, and there is nothing left to enforce.
+//
+// Everything here is synchronous by design. Guests run on a blocking worker; the host drives
+// the future while that worker waits. This sidesteps the least-settled corner of the
+// component model entirely, and it matches how the rest of Arbor already reaches a backend.
+// One package for every interface Arbor defines. WIT treats a directory as a single package,
+// so three packages would need a `deps/` tree — and there is nothing to gain from that here:
+// these interfaces are versioned together, by the host that defines all of them.
+package arbor:extensions@1.0.0;
+
+interface secrets {
+  /// Why a credential call was refused.
+  variant error {
+    /// The key is not one this package declared in `[[credentials]]`.
+    undeclared(string),
+    /// The host has no credential store (a headless or test host).
+    unsupported,
+    /// The store itself failed — locked keychain, denied prompt.
+    store(string),
+  }
+
+  /// Read one of your own credentials. `none` when the slot is empty.
+  ///
+  /// There is no way to name a credential outside your own package: the host resolves the
+  /// key inside your namespace, so Arbor's git tokens are not filtered out of this call,
+  /// they are unreachable through it.
+  get: func(key: string) -> result<option<string>, error>;
+
+  /// Create or replace one of your own credentials.
+  set: func(key: string, value: string) -> result<_, error>;
+
+  /// Remove one of your own credentials. Clearing an empty slot succeeds.
+  delete: func(key: string) -> result<_, error>;
+}
+
+interface http {
+  record header {
+    name: string,
+    value: string,
+  }
+
+  record request {
+    method: string,
+    url: string,
+    headers: list<header>,
+    body: option<list<u8>>,
+    /// Seconds. The host clamps this — a guest cannot hold a worker forever.
+    timeout-secs: option<u32>,
+  }
+
+  record response {
+    status: u16,
+    headers: list<header>,
+    body: list<u8>,
+  }
+
+  variant error {
+    /// The URL's host is not in this package's `[permissions] network` allowlist. The user
+    /// consented to a list, and this is that list being enforced.
+    not-allowed(string),
+    /// The request was made and failed — DNS, TLS, connection, timeout.
+    transport(string),
+    /// The request itself is malformed.
+    invalid(string),
+  }
+
+  /// Perform one HTTP request.
+  ///
+  /// A 4xx or 5xx is a `response`, not an `error`: the request succeeded and the server said
+  /// no, and collapsing those two would make a guest unable to tell a bucket that returned
+  /// 404 from a network that is down.
+  send: func(req: request) -> result<response, error>;
+}
+
+interface log {
+  enum level { debug, info, warn, error }
+
+  /// Append to this package's stream in the Plugin Logs panel. A guest has no stdout worth
+  /// having; this is where it says things.
+  write: func(lvl: level, message: string);
+}

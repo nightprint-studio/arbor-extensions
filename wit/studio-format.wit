@@ -1,0 +1,183 @@
+package arbor:extensions@1.0.0;
+
+// A Studio format backend: what it takes to make a file type openable in Studio's tree,
+// query bar and text view.
+//
+// ## Coarser than the trait it comes from
+//
+// The in-process `StudioFormatBackend` has 36 methods, and several are per-node —
+// `get_children(doc_id, path)`, `get_value(doc_id, path)`. In-process that is a function
+// call. Across a component boundary it is a serialised round trip **per tree expansion**, and
+// a large document is thousands of them.
+//
+// So this interface asks for **subtrees**, not nodes, and batches mutations. A boundary
+// rewards coarse interfaces and punishes chatty ones, and shaping it here is much cheaper
+// than discovering it after five backends have been written against the other shape.
+//
+// ## No filesystem, no network
+//
+// A backend receives text and returns structure. It never opens a file: the host read it,
+// knows its encoding, and is the one that will write it back. That is what makes this the
+// simplest possible guest — nothing in `arbor:host` is needed at all beyond logging.
+interface studio-types {
+  /// How the file was decoded, so a save can round-trip a Windows-1252 or UTF-16 file
+  /// byte-for-byte instead of quietly promoting it to UTF-8.
+  record encoding-info {
+    /// Label as the host sniffed it: `utf-8`, `windows-1252`, `utf-16le`.
+    label: string,
+    /// Whether the original carried a byte-order mark. Dropping one silently is a diff on a
+    /// file nobody edited.
+    bom: bool,
+  }
+
+  /// What a node is, for the tree's icon and for what may be done to it.
+  enum node-kind {
+    object,
+    array,
+    %string,
+    number,
+    boolean,
+    null,
+    /// A format-specific leaf with no JSON analogue — a RON unit variant, a TOML datetime.
+    atom,
+  }
+
+  /// One node, as the tree renders it.
+  record node {
+    /// Path from the root. Segments are keys or decimal indices; the host treats them as
+    /// opaque and hands them back unchanged.
+    path: list<string>,
+    /// What to show in the key column. Empty for an array element.
+    key: string,
+    kind: node-kind,
+    /// Rendered value for a leaf; a short summary (`{3}`, `[12]`) for a container.
+    display: string,
+    /// Whether asking for its children could return anything. A container that is empty
+    /// reports `false`, so the tree does not offer a twisty that opens onto nothing.
+    has-children: bool,
+    /// Byte offsets of this node in the document text, for the text view to scroll and
+    /// highlight. `none` when the backend cannot map it — a synthesised node, a format
+    /// without positions.
+    span: option<span>,
+  }
+
+  record span {
+    start: u32,
+    end: u32,
+  }
+
+  /// One query result.
+  record hit {
+    path: list<string>,
+    display: string,
+    span: option<span>,
+  }
+
+  /// A change to apply. Batched: a rename that moves a subtree is one round trip, and an
+  /// editor applying a multi-site refactor is one call rather than n.
+  variant edit {
+    /// Replace the value at a path with parsed text — the same text the user typed.
+    set-value(tuple<list<string>, string>),
+    /// Rename a key in place, keeping its value and its position among siblings.
+    rename-key(tuple<list<string>, string>),
+    /// Remove the node at a path.
+    remove(list<string>),
+    /// Insert a child. The path names the CONTAINER; the string is the new key (ignored for
+    /// an array, which appends).
+    insert(tuple<list<string>, string, string>),
+  }
+
+  /// What a document's text is being asked for.
+  enum text-flavour {
+    /// Exactly what was parsed, unchanged.
+    original,
+    /// The current state, serialised in the document's own style.
+    current,
+    /// The current state, reformatted with the document's indent.
+    formatted,
+  }
+
+  variant error {
+    /// The text is not valid for this format. Carries the message and, where the parser
+    /// knows it, where — which is the whole reason to run a real parser instead of a
+    /// tolerant one.
+    parse(tuple<string, option<span>>),
+    /// The path names nothing.
+    no-such-path(list<string>),
+    /// The edit is not legal here — inserting a key into an array, a value that does not
+    /// parse as this format.
+    invalid-edit(string),
+    /// The backend refuses for a reason of its own.
+    other(string),
+  }
+}
+
+interface studio-format {
+  use studio-types.{encoding-info, node, hit, edit, text-flavour, error};
+
+  /// One open document.
+  ///
+  /// A resource rather than a `doc_id: string` handle: the host cannot fabricate one, cannot
+  /// use one after closing it, and dropping it is what frees the backend's state. The
+  /// string-handle version of this interface needed a `close` that a caller could forget.
+  resource document {
+    /// Parse text into a document. The heaviest call in the interface, and the only one that
+    /// looks at the whole input.
+    parse: static func(
+      text: string,
+      source-path: option<string>,
+      encoding: encoding-info,
+    ) -> result<document, error>;
+
+    /// Replace the whole text, keeping the same handle. What the text view's editor does on
+    /// every keystroke burst, so it must not be more expensive than `parse`.
+    set-text: func(text: string) -> result<_, error>;
+
+    /// The document's text in one of its flavours.
+    text: func(flavour: text-flavour) -> result<string, error>;
+
+    /// The encoding this document was parsed with, so the host writes it back the same way.
+    encoding: func() -> encoding-info;
+
+    /// The indent string this document uses (`"  "`, `"\t"`), inferred at parse time.
+    indent: func() -> string;
+    set-indent: func(indent: string) -> result<_, error>;
+
+    /// The nodes under `path`, `depth` levels deep. `depth` of 1 is one level of children.
+    ///
+    /// **The interface's central call.** Asking for a subtree rather than a node is what
+    /// keeps a large document from becoming thousands of round trips: the tree requests the
+    /// depth it is about to render, once.
+    ///
+    /// An empty `path` is the root.
+    subtree: func(path: list<string>, depth: u32) -> result<list<node>, error>;
+
+    /// The raw value at a leaf, as text — what the editor puts in the field when you click
+    /// to edit it.
+    value: func(path: list<string>) -> result<string, error>;
+
+    /// Run a format-appropriate query: JSONPath for JSON, the nearest equivalent elsewhere.
+    query: func(expr: string) -> result<list<hit>, error>;
+
+    /// Apply edits, in order, atomically.
+    ///
+    /// Atomic because a half-applied batch leaves a document nobody can reason about: the
+    /// user sees some of their change and the undo stack has one entry. If any edit fails,
+    /// none is applied and the error names the one that did.
+    apply: func(edits: list<edit>) -> result<_, error>;
+
+    /// Whether the document differs from what was parsed.
+    dirty: func() -> bool;
+  }
+}
+
+/// The world a format backend exports.
+///
+/// It imports `arbor:host/log` and nothing else. A backend that wanted network or secrets
+/// would be doing something other than parsing a file, and the narrowness is the point: this
+/// is the guest that needs no capability at all, which makes it the right one to build the
+/// runtime against first.
+world studio-format-world {
+  import log;
+  export studio-format;
+}

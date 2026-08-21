@@ -1,0 +1,22 @@
+name        = "bevy-runtime"
+version     = "0.1.0"
+description = "A 3D viewport any plugin can open, driven by RON scene documents. Ships the runtime once so no plugin has to carry its own."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "tools"
+keywords    = ["bevy", "3d", "viewport", "preview", "shader"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+# No [lua] and no [[provides]]. This package is neither a plugin nor a wasm extension in the
+# component-model sense: it is a **web bundle** another plugin points an `embed` node at.
+#
+# Two different things are called wasm and it matters here. An extension is `wasm32-wasip2`,
+# instantiated by the host in a sandbox with declared capabilities. This is
+# `wasm32-unknown-unknown` with wasm-bindgen — a browser module, loaded by the webview,
+# isolated by the frame it runs in rather than by the host. Neither can substitute for the
+# other, and pretending otherwise would put a GPU inside a sandbox that has none.
+
+[permissions]
+# Nothing. The runtime reaches no network, no filesystem and no credentials: it is handed a
+# scene and some parameters through postMessage and draws them.

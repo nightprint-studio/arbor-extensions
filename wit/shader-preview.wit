@@ -1,0 +1,190 @@
+package arbor:extensions@1.0.0;
+
+// Turning a shader source into something that can be drawn.
+//
+// ## Why this is a translator and not a renderer
+//
+// A guest has no GPU. It cannot rasterize, and an interface that pretended otherwise would
+// end at a frame buffer copied out of a sandbox sixty times a second. So the work is split
+// where the machine already splits it: the **CPU part** — parse the source, resolve its
+// imports, substitute the defines, translate to a dialect the viewer can compile — happens
+// here, and the **GPU part** happens in the canvas the host already owns.
+//
+// That division is what makes this interface worth having. Translating a shading language is
+// exactly the kind of job that wants a big Rust dependency (`naga`, and a shader library to
+// resolve against) and exactly the kind Arbor should not be carrying for a feature not
+// everyone uses. Drawing a triangle is not.
+//
+// ## What a backend is allowed to assume
+//
+// Nothing about the file system: it never sees a path it can open. The host reads every
+// module the shader might import and hands them over in the request, because the host is the
+// one with the project index — it already knows what `#import myapp::lighting` resolves to,
+// and a guest guessing would be a second, worse resolver.
+//
+// ## Dialects
+//
+// The result is GLSL ES 3.00, because that is what a WebView compiles today without a flag.
+// It is named in the record rather than assumed so a backend targeting WGSL — once WebGPU is
+// reachable in the viewers Arbor supports — is a new value and not a new interface.
+interface preview-types {
+  /// One source file, as the shader would name it.
+  record source-file {
+    /// The name an `#import` would use (`bevy_pbr::mesh_view_bindings`), or a plain file name
+    /// for the entry itself. Not a path: a guest has no file system, and this is an identity
+    /// the resolver on the host side already decided.
+    path: string,
+    text: string,
+  }
+
+  /// What the viewer will compile.
+  enum dialect {
+    // `glsl-es3` and not `glsl-es-300`: a WIT identifier's words each have to start with a
+    // letter, so `-300` is not a word. The version is in the doc comment where it can be
+    // precise instead of in the name where it cannot.
+    /// GLSL ES 3.00 — WebGL2. The one every WebView compiles today.
+    glsl-es3,
+    /// WGSL — WebGPU. Accepted so a backend can say it produced one; a host that cannot
+    /// reach WebGPU refuses it rather than mis-compiling it.
+    wgsl,
+  }
+
+  /// The type of a uniform, in the only granularity a caller has to care about to upload one.
+  enum value-kind {
+    f32-scalar,
+    vec2,
+    vec3,
+    vec4,
+    mat3,
+    mat4,
+    i32-scalar,
+    boolean,
+  }
+
+  /// Where a uniform's value comes from.
+  ///
+  /// The point of this enum is that the host can fill a `time` without being told what to put
+  /// in it, and a backend can mark everything else `custom` and let the panel offer a control.
+  /// A backend that invented its own names for the standard ones would make every host
+  /// string-match, which is how `iResolution` became folklore instead of an interface.
+  enum binding-role {
+    /// Seconds since the preview started, as f32.
+    time,
+    /// Viewport size in pixels, as vec2.
+    resolution,
+    /// Object → world.
+    model,
+    /// World → view.
+    view,
+    /// View → clip.
+    projection,
+    /// Object → clip, premultiplied. Supplied because a shader that only needs this should
+    /// not force the host to guess the multiplication order.
+    model-view-projection,
+    /// Inverse-transpose of the model matrix, mat3, for normals.
+    normal-matrix,
+    /// Camera position in world space, vec3.
+    camera-position,
+    /// Primary light direction in world space, vec3.
+    light-direction,
+    /// Pointer position in pixels, vec2. Zero when the pointer is outside the canvas.
+    pointer,
+    /// Anything else. The panel offers a control seeded with `default-value`.
+    custom,
+  }
+
+  /// A uniform the program declares and something has to fill.
+  record uniform-slot {
+    /// The name in the translated source, which is what `getUniformLocation` needs — a
+    /// translator renames, and the original name would not find anything.
+    name: string,
+    kind: value-kind,
+    role: binding-role,
+    /// JSON: a number, a bool, or an array of numbers in column-major order for matrices.
+    /// Read only for `custom` — a standard role's value comes from the host.
+    default-value: string,
+    /// Shown beside the control for a `custom` slot. Empty when there is nothing to say.
+    label: string,
+  }
+
+  /// What a vertex attribute is for.
+  enum attribute-role {
+    position,
+    normal,
+    uv,
+    tangent,
+    color,
+    /// Something the mesh cannot supply. The host binds a zero buffer and warns.
+    unknown,
+  }
+
+  record attribute-slot {
+    name: string,
+    /// The `layout(location = N)` the translated source assigned. Bound by number rather than
+    /// by name because that is the one thing a translator does not change.
+    location: u32,
+    role: attribute-role,
+    /// Components per vertex: 3 for a position, 2 for a uv.
+    components: u32,
+  }
+
+  record prepared {
+    dialect: dialect,
+    vertex: string,
+    fragment: string,
+    uniforms: list<uniform-slot>,
+    attributes: list<attribute-slot>,
+    /// Things that compiled but are worth saying: a feature stubbed out, an import resolved
+    /// to an approximation. A warning is not a failure and must not be rendered as one.
+    warnings: list<string>,
+  }
+
+  variant error {
+    /// The source did not parse. Carries the message and, where there is one, the byte offset.
+    parse(tuple<string, option<u32>>),
+    /// An `#import` named something the request did not carry.
+    missing-module(string),
+    /// It parsed, but nothing here can express it in the target dialect.
+    unsupported(string),
+    /// The backend itself is misconfigured.
+    internal(string),
+  }
+}
+
+interface shader-preview {
+  use preview-types.{source-file, dialect, prepared, error};
+
+  /// What this backend handles, so a panel can say "no backend for .glsl" instead of trying
+  /// and reporting a parse error the user cannot act on.
+  record backend-info {
+    /// Lowercase extensions without the dot: `["wgsl"]`.
+    extensions: list<string>,
+    /// Human name for the Extensions section.
+    label: string,
+    dialect: dialect,
+    /// `#ifdef` names this backend understands, for the panel's toggles. Empty when it has no
+    /// opinion and the caller may pass anything.
+    known-defines: list<string>,
+  }
+
+  describe: func() -> backend-info;
+
+  /// Translate one shader into something the viewer can compile.
+  ///
+  /// `modules` carries every file the entry might import, already read. `defines` are the
+  /// `#ifdef` names to treat as set.
+  prepare: func(
+    entry: source-file,
+    modules: list<source-file>,
+    defines: list<string>,
+  ) -> result<prepared, error>;
+}
+
+/// The world a shader-preview backend exports.
+///
+/// It imports `log` and nothing else. A translator needs no network, no secrets and no
+/// filesystem, and a backend that asked for one would be saying something about itself.
+world shader-preview-world {
+  import log;
+  export shader-preview;
+}

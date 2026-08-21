@@ -1,0 +1,61 @@
+[package]
+name        = "arbor-bevy-runtime"
+version     = "0.1.0"
+edition     = "2021"
+license     = "MIT"
+description = "One Bevy app that draws a RON-described scene, for any Arbor plugin that needs a viewport."
+
+# Its own workspace: this builds for wasm32-unknown-unknown with wasm-bindgen, and the
+# component packages next door build for wasm32-wasip2 with a profile tuned for size. Two
+# targets with two sets of release settings do not share a workspace comfortably.
+[workspace]
+
+[dependencies]
+bevy = { version = "0.18", default-features = false, features = [
+  "bevy_asset",
+  "bevy_core_pipeline",
+  "bevy_pbr",
+  "bevy_render",
+  "bevy_window",
+  "bevy_winit",
+  "webgl2",
+  "tonemapping_luts",
+  "ktx2",
+  "zstd_rust",
+  "x11",
+] }
+ron        = "0.8"
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys      = { version = "0.3", features = ["Window", "MessageEvent", "EventTarget"] }
+js-sys       = "0.3"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The headless renderer — the same scene, materials and meshes as the viewport, rendered once
+# to a PNG for a caller that cannot look at a webview. Behind a feature so the wasm build does
+# not try to compile it: `build.sh` never enables it, `build-render.sh` does.
+[[bin]]
+name              = "arbor-shader-render"
+path              = "src/bin/shader_render.rs"
+required-features = ["native-render"]
+
+[features]
+default = []
+# `png` is what `save_to_disk` needs to encode the capture. Enabled only for the native
+# renderer, so the bundle that travels over a network on install does not carry an encoder
+# nothing in the browser calls.
+native-render = ["bevy/png"]
+
+[profile.release]
+# A viewer's frame time matters more than its size here, but the bundle travels over a network
+# on install, so this is the middle: optimise, and let `wasm-opt` do the rest afterwards.
+opt-level = "s"
+lto       = "thin"
+# Debug info is most of a Bevy wasm bundle's size and none of its use in a viewer — the
+# unstripped build is 58 MB, and this travels over a network on install.
+strip     = "debuginfo"

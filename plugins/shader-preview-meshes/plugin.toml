@@ -1,0 +1,26 @@
+name        = "shader-preview-meshes"
+version     = "1.0.0"
+description = "Sphere, cube, plane and torus for a shader preview — and the seam a package of your own geometry plugs into."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "tools"
+keywords    = ["mesh", "geometry", "preview", "shader"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+# No [lua]: this package is an extension and nothing else. It answers when something asks for
+# geometry; it has no panel, no settings and no on/off of its own.
+
+[permissions]
+# None, and that is worth saying out loud. A mesh source is a pure function from parameters to
+# vertices — no network, no filesystem, no credentials. It is the one kind of extension where
+# the sandbox costs nothing at all.
+
+[[provides]]
+interface = "mesh-source"
+version   = 1
+id        = "primitives"
+module    = "shader_preview_meshes.wasm"
+
+[wasm]
+target = "wasm32-wasip2"

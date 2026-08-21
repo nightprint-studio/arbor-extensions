@@ -1,0 +1,21 @@
+<h1>Preview meshes</h1>
+<p>
+  Four shapes for looking at a material: a <strong>sphere</strong> (every surface normal at
+  once), a <strong>cube</strong> (a hard normal discontinuity), a <strong>plane</strong> (no
+  geometry in the way of a shader that only writes colour) and a <strong>torus</strong> — the
+  cheapest shape with both curvature signs, so a term that reads right on a sphere and wrong in
+  a saddle shows the difference there and nowhere else.
+</p>
+<p>
+  The sphere and the torus take a <code>resolution</code> between 1 and 4. Turn it up when a
+  shader perturbs normals and you want more geometry for it to work with.
+</p>
+<h2>Your own geometry</h2>
+<p>
+  Build a second <code>mesh-source</code> package from your engine's own crates and drop it in
+  your plugins folder — it appears in the picker beside these. It never has to be published: a
+  package is a folder with a <code>plugin.toml</code>, and the registry is how other people
+  find one, not how Arbor loads one.
+</p>
+<h2>What it can reach</h2>
+<p>Nothing. No network, no filesystem, no credentials.</p>

@@ -1,0 +1,152 @@
+# Cut a release for one package.
+#
+# Triggered by a tag `<package>-v<semver>` — `cloud-gcs-v1.4.0`, `studio-json-v2.0.0`. The
+# package name is prefixed because this repo holds many packages on independent version
+# lines, and a bare `v2.0.0` cannot say which one moved.
+#
+# ## What it produces
+#
+#   * one `.wasm` per `[[provides]]` entry in the package's `plugin.toml`
+#   * `<package>-<version>.zip` — the readable half: the manifest, the Lua, the docs
+#   * a job summary containing the exact `artifacts` block to paste into the registry's
+#     `index.json`
+#
+# That last one is the point of the whole file. A `.wasm` cannot be reviewed, so what a
+# reviewer approves in the registry PR is a **digest**, and asking somebody to compute four
+# of those by hand is asking for the step to be skipped.
+#
+# ## What it does NOT do
+#
+# It does not touch `index.json`. Listing a version is a human decision made in a pull
+# request — that PR *is* the review, and a bot that opened it for itself would be reviewing
+# its own work.
+#
+# A package with no `[[provides]]` needs no release at all: it installs from the source
+# archive of its ref, which is how every Lua-only plugin in this repo works today. The
+# workflow still runs for one, produces just the zip, and says so.
+
+name: release
+
+on:
+  push:
+    tags:
+      - '*-v[0-9]+.[0-9]+.[0-9]+'
+      - '*-v[0-9]+.[0-9]+.[0-9]+-*'   # pre-releases: -rc.1, -beta.2
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the package from the tag
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          # Split at the LAST `-v`: a package name may itself contain `-v`.
+          name="${tag%-v*}"
+          version="${tag##*-v}"
+          echo "name=$name"       >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # Found by manifest content rather than by a hardcoded directory, so the layout can
+          # differ between this repo and the ones that hold wasm packages without this file
+          # having an opinion about either.
+          dir=""
+          while IFS= read -r manifest; do
+            declared="$(grep -m1 -E '^\s*name\s*=' "$manifest" | sed -E 's/.*"(.*)".*/\1/')"
+            if [ "$declared" = "$name" ]; then dir="$(dirname "$manifest")"; break; fi
+          done < <(find . -name plugin.toml -not -path './.git/*' | sort)
+
+          if [ -z "$dir" ]; then
+            echo "::error::no package declares name = \"$name\" (tag $tag)"
+            exit 1
+          fi
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "Package '$name' v$version at $dir"
+
+          # The manifest's own version has to agree with the tag, or the catalogue would show
+          # one number and install another.
+          mv="$(grep -m1 -E '^\s*version\s*=' "$dir/plugin.toml" | sed -E 's/.*"(.*)".*/\1/')"
+          if [ "$mv" != "$version" ]; then
+            echo "::error::$dir/plugin.toml says version = \"$mv\" but the tag says $version"
+            exit 1
+          fi
+
+      - name: Collect the modules this package provides
+        id: modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          mods="$(grep -E '^\s*module\s*=' "${{ steps.pkg.outputs.dir }}/plugin.toml" \
+                  | sed -E 's/.*"(.*)".*/\1/' | sort -u || true)"
+          {
+            echo 'list<<EOF'
+            echo "$mods"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          if [ -z "$mods" ]; then
+            echo "No [[provides]] — Lua-only package, nothing to compile."
+          else
+            echo "Modules: $mods"
+          fi
+
+      - name: Install the wasm target
+        if: steps.modules.outputs.list != ''
+        run: |
+          target="$(grep -E '^\s*target\s*=' "${{ steps.pkg.outputs.dir }}/plugin.toml" \
+                    | sed -E 's/.*"(.*)".*/\1/' | head -1)"
+          echo "WASM_TARGET=${target:-wasm32-wasip2}" >> "$GITHUB_ENV"
+          rustup target add "${target:-wasm32-wasip2}"
+
+      - name: Build
+        if: steps.modules.outputs.list != ''
+        run: cargo build --release --target "$WASM_TARGET"
+
+      - name: Stage the assets
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/assets"; mkdir -p "$out"
+          name="${{ steps.pkg.outputs.name }}"; version="${{ steps.pkg.outputs.version }}"
+          dir="${{ steps.pkg.outputs.dir }}"
+
+          # The readable half. Everything the reviewer can actually read travels together and
+          # is rooted at the package files, not inside a wrapping folder.
+          ( cd "$dir" && zip -qr "$out/$name-$version.zip" . -x '*/target/*' -x 'target/*' \
+              -x '*/Cargo.toml' -x '*/src/*' )
+
+          while IFS= read -r m; do
+            [ -z "$m" ] && continue
+            src="target/$WASM_TARGET/release/$m"
+            if [ ! -f "$src" ]; then
+              echo "::error::$m is declared in plugin.toml but the build did not produce $src"
+              exit 1
+            fi
+            cp "$src" "$out/$m"
+          done <<< "${{ steps.modules.outputs.list }}"
+
+          echo "dir=$out" >> "$GITHUB_OUTPUT"
+          ls -l "$out"
+
+      - name: Registry entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/registry-entry.sh \
+            "${{ steps.pkg.outputs.name }}" \
+            "${{ steps.pkg.outputs.dir }}" \
+            "${GITHUB_REF_NAME}" \
+            "${{ steps.stage.outputs.dir }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.stage.outputs.dir }}/*
+          fail_on_unmatched_files: true

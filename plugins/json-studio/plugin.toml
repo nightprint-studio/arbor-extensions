@@ -1,6 +1,6 @@
 name        = "json-studio"
 version     = "1.0.0"
-description = "IntelliJ-style JSON viewer: lazy tree, JSONPath query, syntax-highlighted text. Backed by simd-json on the host side; designed to migrate to a self-contained WASM plugin once the runtime lands."
+description = "IntelliJ-style JSON viewer: lazy tree, JSONPath query, syntax-highlighted text. Backed by simd-json on the host side; the WASM backend that will replace it lives in `backend/` and already builds."
 author      = "Nightprint Studio"
 repository  = "https://github.com/nightprint-studio/arbor-extensions"
 category    = "data"
@@ -18,3 +18,24 @@ fs = "read"
 
 [hooks]
 "arbor:plugin_load" = true
+
+# ── The WASM backend ──────────────────────────────────────────────────────────
+#
+# `backend/` implements `arbor:extensions/studio-format@1` as a component. It builds
+# (`cargo build --release --target wasm32-wasip2`) and Arbor's host instantiates it — its
+# imports resolve and its exports match the world.
+#
+# The block below is NOT active yet, deliberately. Declaring `[[provides]]` advertises a
+# capability, and Studio still serves JSON from the in-process backend on the host side; a
+# package that announced an interface nothing consumes would be listed as broken by the very
+# check that exists to catch that. It goes live in the same change that routes Studio through
+# the guest.
+#
+# [[provides]]
+# interface = "studio-format"
+# version   = 1
+# id        = "json"
+# module    = "studio_json.wasm"
+#
+# [wasm]
+# target = "wasm32-wasip2"

@@ -40,3 +40,14 @@ luac.out
 *.hex
 
 .arbor
+# Rust build output — modules ship as release assets, never committed.
+target/
+
+# The Bevy runtime's browser bundle. Build output, ~56 MB, and it travels as a release asset
+# like every other compiled artifact here — a binary committed to this repo is a binary nobody
+# can review in the pull request that adds it.
+plugins/bevy-runtime/web/runtime.js
+plugins/bevy-runtime/web/runtime_bg.wasm
+
+# The mesh component, for the same reason.
+plugins/*/[a-z_]*.wasm

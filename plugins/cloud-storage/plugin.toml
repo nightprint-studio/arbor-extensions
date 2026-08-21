@@ -1,23 +1,35 @@
 name        = "cloud-storage"
 version     = "1.0.0"
-description = "Browse, upload, download and sync files between Arbor and Google Cloud Storage (S3 / Azure coming soon)."
+description = "Object storage in Arbor — browse, upload, download and sync buckets. The panel and the connection settings; the backends that talk to each store ship as their own packages."
 author      = "Nightprint Studio"
 repository  = "https://github.com/nightprint-studio/arbor-extensions"
 category    = "data"
-keywords    = ["cloud", "gcs", "s3", "storage", "sync"]
+keywords    = ["cloud", "gcs", "s3", "azure", "storage", "sync"]
 arbor_api   = 1
 doc_file    = "doc.html"
 
+# The Lua half, and in this package the only half. The providers are separate packages that
+# depend on this one — see `plugins/cloud-gcs`. Splitting them means somebody who only uses
+# S3 never carries GCS's OAuth code, and a third party can add a backend without touching
+# anything here.
+[lua]
+entry = "main.lua"
+
 [permissions]
-fs       = "write"           # Local filesystem read/write for downloads & uploads.
-fs_scope = ["*"]              # User picks paths via the native picker — can be anywhere.
+# Local filesystem read/write for downloads & uploads. The user picks paths through the
+# native picker, so the scope cannot be narrowed to a repo.
+fs       = "write"
+fs_scope = ["*"]
+
+# NOTE: no `network`. This package does not talk to any store — that is the providers' job,
+# and they hold the permission for the hosts they actually reach. A UI package with a network
+# allowlist would be a UI package that could be made to fetch.
+
 # Required for chunk-merger contributions: chunks.lua calls
-# `arbor.service.call("<handler-plugin>.merge", …):ok/err` after a multi-chunk
-# download to drive the merge phase. Without this permission `arbor.service.call`
-# is nil and the merge handler invocation raises silently inside the
-# `download-many-done` hook — leaving the OperationsOverlay card stuck on
-# "Concatenating chunks…" forever (no :ok/:err callback ever fires, so
-# `report_done` is never reached).
+# `arbor.service.call("<handler-plugin>.merge", …)` after a multi-chunk download to drive the
+# merge phase. Without it `arbor.service.call` is nil and the merge handler invocation raises
+# silently inside the `download-many-done` hook — leaving the operations card stuck on
+# "Concatenating chunks…" forever.
 service_call = true
 
 [hooks]

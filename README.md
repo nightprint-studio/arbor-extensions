@@ -60,6 +60,10 @@ The maturity tag travels with the plugin (it's declared in `plugin.toml`), so it
 | **deps-explorer** | Surfaces project dependencies and flags outdated or vulnerable ones | Stable |
 | **cloud-storage** | Browse and upload/download to cloud object stores. Tested with Google Cloud Storage | Stable |
 | **chunk-merger-bin** | Helper for `cloud-storage`: reassembles chunked downloads | Stable |
+| **cloud-gcs** | Google Cloud Storage backend for `cloud-storage`. A wasm extension — no Lua, no UI | Beta |
+| **bevy-runtime** | A 3D viewport any plugin can open, driven by RON scene documents. Ships the engine once | Beta |
+| **shader-preview** | Look at a WGSL material while you edit it — real Bevy lighting, parameters on sliders | Beta |
+| **shader-preview-meshes** | Sphere, cube, plane, torus. A `mesh-source` extension, and the seam your own geometry plugs into | Beta |
 | **source-export** | Workflow engine for exporting code to external repos | Functional |
 | **release-notes** | Generates release notes from commits between two refs | Functional |
 | **commit-validator** | Vetoable pre-commit message validation hooks | Experimental |
@@ -128,6 +132,63 @@ You don't need to drop your code in this repo. The supported path for third-part
 `pinned_sha` is optional but strongly recommended for tag-based refs; without it Arbor surfaces an **Unpinned** badge in the Marketplace detail view.
 
 The full plugin development reference — manifest schema, hooks, the Lua API surface — lives inside Arbor's in-app **Docs** panel.
+
+## Publishing a package that carries a built artifact
+
+Some packages are more than Lua. A package that implements a host-defined interface — a
+Studio format backend, a cloud provider — declares it in the manifest:
+
+```toml
+[[provides]]
+interface = "studio-format"
+version   = 1
+id        = "json"
+module    = "studio_json.wasm"
+
+[wasm]
+target = "wasm32-wasip2"
+```
+
+and its `.wasm` is a **build output**, not a file in the repo. That changes two things.
+
+### It installs from a release, not from a source archive
+
+The `.wasm` is not in the tree a commit points at, so there is nothing for a source-archive
+install to find. A package with any `[[provides]]` entry installs from the GitHub release for
+its tag instead. A package without one is unaffected and keeps working exactly as before.
+
+### Its assets are pinned by digest
+
+`pinned_sha` answers *"is this still the commit that was reviewed?"* — and for source that
+settles it, because git is content-addressed. It says nothing about a build output.
+
+So the registry entry records a `sha256` for each asset, and the installer refuses anything
+else. A reviewer still cannot read a `.wasm`; what they **can** do is pin which one was
+approved, so a later substitution fails to install. That is where every package manager
+stops, and it is why the digests live in the reviewed `index.json` rather than in the
+package's own manifest: a digest the author supplies verifies only that the author is
+consistent with themselves.
+
+### Cutting a release
+
+Tag `<package>-v<semver>` — `cloud-gcs-v1.4.0`. The name is prefixed because this repo holds
+many packages on independent version lines, and a bare `v1.4.0` cannot say which one moved.
+The tag's version must match the manifest's, or the workflow stops: otherwise the catalogue
+would show one number and install another.
+
+`.github/workflows/release.yml` then builds every declared module, zips the readable half,
+publishes both, and prints the exact `index.json` block — digests included — into the job
+summary. Paste it into a PR here.
+
+The workflow does **not** touch `index.json` itself. Listing a version is a human decision
+made in a pull request; that PR *is* the review, and a bot opening it would be reviewing its
+own work.
+
+You can produce the same block locally:
+
+```bash
+tools/registry-entry.sh <package-name> <package-dir> <tag> <assets-dir>
+```
 
 ## Reporting issues
 

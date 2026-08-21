@@ -1,0 +1,145 @@
+package arbor:extensions@1.0.0;
+
+// A cloud object-storage provider: what it takes to make a bucket browsable in the file
+// explorer.
+//
+// ## Coarse on purpose, and it comes by it honestly
+//
+// Unlike a format backend, this interface did not have to be reshaped to survive a boundary —
+// object storage is already coarse. `list`, `stat`, `read`, `write`: few calls, large
+// payloads, every one of them already a network round trip. The cost of the component
+// boundary disappears next to the cost of the request it wraps.
+//
+// That is why this is the right guest to prove the runtime on, even though it is the one
+// that needs capabilities: there is no shape question left to get wrong.
+//
+// ## The guest does not hold the credential
+//
+// A provider asks `arbor:host/secrets` for a token by the key its manifest declared, and it
+// asks `arbor:host/http` to perform requests. It never opens a socket and never speaks TLS.
+// The host is Arbor's credential broker already; a guest that could hold the token would put
+// the enforcement of "only the slots you declared" back into a promise.
+interface cloud-types {
+  /// One entry in a listing.
+  record object {
+    /// Full key within the bucket. `a/b/c.txt` — never a local path.
+    key: string,
+    /// Whether this is a prefix (a "folder") rather than a stored object. Object stores have
+    /// no directories; a listing synthesises them, and the explorer needs to know which it
+    /// is looking at to decide whether descending is meaningful.
+    prefix: bool,
+    size: u64,
+    /// Unix seconds. `none` when the store does not report one, which several do not for a
+    /// synthesised prefix.
+    modified: option<u64>,
+    /// The store's own version of "this has not changed" — an ETag, a generation number.
+    /// Opaque; used only for comparison.
+    etag: option<string>,
+    content-type: option<string>,
+  }
+
+  record listing {
+    entries: list<object>,
+    /// Opaque continuation. `none` when the listing is complete.
+    ///
+    /// A cursor rather than a page number because that is what every object store actually
+    /// offers, and inventing page numbers on top means holding state the store does not.
+    cursor: option<string>,
+  }
+
+  /// A byte range, for resuming an interrupted download and for reading a header without
+  /// pulling a multi-gigabyte object.
+  record range {
+    start: u64,
+    /// Exclusive. `none` reads to the end.
+    end: option<u64>,
+  }
+
+  variant error {
+    /// The key does not exist.
+    not-found(string),
+    /// The store said no. Distinct from `not-found` because the fix is different: one is a
+    /// typo, the other is a permission or an expired token.
+    denied(string),
+    /// The credential is missing, malformed or expired.
+    auth(string),
+    /// The request reached the store and it failed for another reason. Carries the status
+    /// where there was one.
+    remote(tuple<option<u16>, string>),
+    /// The request could not be made — network down, host not in the allowlist.
+    transport(string),
+    /// The connection config is not usable.
+    config(string),
+  }
+}
+
+interface cloud-provider {
+  use cloud-types.{object, listing, range, error};
+
+  /// A live connection to one bucket.
+  ///
+  /// Opening is separate from every operation because authentication is: a GCS token refresh
+  /// or an STS assume-role happens once and is reused, and an interface where each call
+  /// carried its config would redo it on every keystroke of a directory listing.
+  resource connection {
+    /// Open a bucket.
+    ///
+    /// `config` is the provider's own JSON — endpoint, region, whichever of them this
+    /// provider needs. It is opaque to the host, which has no business knowing what an S3
+    /// region is; the settings panel that produced it belongs to the same package.
+    ///
+    /// Credentials are NOT in here. The provider fetches them by key from
+    /// `arbor:host/secrets`, which is what keeps a token out of a config file.
+    open: static func(bucket: string, config: string) -> result<connection, error>;
+
+    /// Check the connection is usable, for the settings panel's "Test" button. Cheap and
+    /// side-effect free — typically a zero-length list.
+    test: func() -> result<_, error>;
+
+    /// One page of a listing under `prefix`.
+    ///
+    /// `delimiter` set to `/` gives the folder-shaped view the explorer renders; unset walks
+    /// everything under the prefix, which is what a search does.
+    // `%list`: `list` is a WIT keyword (the built-in `list<T>`), and the escape is what the
+    // language provides for exactly this. Renaming it would cost the one word every object
+    // store calls this operation.
+    %list: func(
+      prefix: string,
+      delimiter: option<string>,
+      cursor: option<string>,
+      limit: option<u32>,
+    ) -> result<listing, error>;
+
+    /// Metadata for one key, without fetching it.
+    stat: func(key: string) -> result<object, error>;
+
+    /// Read an object, or part of one.
+    ///
+    /// Returns bytes rather than streaming them. A stream out of a guest is the hardest shape
+    /// the component model has, and ranged reads cover what streaming was wanted for: the
+    /// caller asks for the slice it can hold. The host chunks a large download by calling
+    /// this repeatedly.
+    read: func(key: string, part: option<range>) -> result<list<u8>, error>;
+
+    /// Write an object whole.
+    write: func(key: string, body: list<u8>, content-type: option<string>) -> result<_, error>;
+
+    /// Remove an object. Removing something absent succeeds — the caller asked for it to be
+    /// gone, and it is.
+    delete: func(key: string) -> result<_, error>;
+
+    /// Server-side copy, so the bytes never travel through this machine.
+    ///
+    /// `source`/`destination` rather than `from`/`to`: `from` is a WIT keyword, and a pair of
+    /// parameters where one is escaped and the other is not reads worse than naming both.
+    copy: func(source: string, destination: string) -> result<_, error>;
+  }
+}
+
+/// The world a cloud provider exports.
+world cloud-provider-world {
+  import secrets;
+  import http;
+  import log;
+  export cloud-provider;
+}

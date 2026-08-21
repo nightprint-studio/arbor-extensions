@@ -1,0 +1,48 @@
+<h1>Bevy runtime</h1>
+
+<p>
+  A 3D viewport that any plugin can open. It ships once and is shared, so a plugin that needs
+  to draw something does not have to carry a game engine of its own — which would otherwise be
+  tens of megabytes per plugin, downloaded separately, built separately.
+</p>
+
+<h2>Scenes are documents</h2>
+<p>
+  What it draws is described by a <code>.ron</code> file, in the same dialect used across
+  fulcrum's content: a camera rig, a light rig, an environment, and the entities to place. The
+  runtime reads the document and builds it. It has no idea what a shader preview is.
+</p>
+<p>
+  That is what makes it extensible without being a monolith. A compiled Bevy app cannot load
+  Rust at runtime, so if a scene were a function, adding one would mean rebuilding and
+  reshipping this package. Adding a scene is adding a file.
+</p>
+
+<h2>Holes</h2>
+<p>
+  A scene declares what it does <em>not</em> know as <code>Param("name")</code>. The shader
+  preview scene, for instance, leaves the WGSL, the mesh and the material parameters to
+  whoever opens it — which is how one scene serves every plugin that wants to look at a
+  material, without the scene knowing where any of it came from.
+</p>
+
+<h2>Real Bevy, not an approximation</h2>
+<p>
+  The shader you give it is compiled by Bevy itself, so <code>#import bevy_pbr::…</code>
+  resolves against the real shader library and <code>apply_pbr_lighting</code> is the real
+  one. What you see is what ships. A translator would have had to stand in for that frame, and
+  a stand-in is a different picture.
+</p>
+
+<h2>What it can reach</h2>
+<p>
+  Nothing. No network, no filesystem, no credentials. It runs in a frame with an opaque origin
+  — no storage, no cookies, no access to the application around it — and the only way in or out
+  is the message channel the host provides.
+</p>
+
+<h2>Installing it on its own</h2>
+<p>
+  Nothing happens: it draws when a plugin opens a scene in it. Install it because something
+  else asked for it.
+</p>

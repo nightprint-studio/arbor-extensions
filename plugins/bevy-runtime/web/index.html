@@ -1,0 +1,97 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Arbor Bevy runtime</title>
+<!--
+  The page that hosts the runtime.
+
+  It is deliberately almost empty. Its whole job is to be the thing an `embed` node points at:
+  load the wasm, give Bevy a canvas, and relay messages in both directions. Anything smarter
+  here would be logic in a file nobody thinks to look in.
+
+  ## Relaying, and why in both directions
+
+  The runtime posts to `window` rather than to `parent`, so that it works the same whether it
+  is embedded or opened on its own. This page is what knows it is in a frame, and forwards.
+  Inbound it is the mirror: a message from the embedder goes into the wasm.
+
+  A message from the runtime and a message from the embedder both arrive as `message` events
+  on this window, so they are told apart by source — `event.source === window` is ours coming
+  back out, anything else is coming in. Getting that wrong is an echo loop.
+-->
+<style>
+  /* The page IS the viewport here, so the controls anchor to it. The background matches
+     Arbor's `--bg-base` so the frame does not read as a hole in the panel it sits in during
+     the moment before Bevy paints. */
+  html, body { margin: 0; height: 100%; background: #1e1f22; overflow: hidden;
+               position: relative; }
+  /* Bevy sizes the backing store; CSS owns the box. `display:block` kills the inline-element
+     baseline gap that otherwise shows as a few pixels of background under the canvas. */
+  #view { display: block; width: 100%; height: 100%; }
+  #boot {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #7a7d85; font: 12px/1.5 'Segoe UI', 'Inter', system-ui, sans-serif;
+  }
+  #boot[hidden] { display: none; }
+</style>
+
+<canvas id="view"></canvas>
+<p id="boot">Starting the viewport…</p>
+<div class="cam-controls"></div>
+
+<script type="module">
+  import init, { arbor_start, arbor_send } from './runtime.js';
+  import { installCameraControls, CAMERA_CSS } from './camera.js';
+
+  // The controls carry their own stylesheet, so a page that hosts the runtime does not keep
+  // a copy of it that can drift from the module's markup.
+  document.head.appendChild(Object.assign(document.createElement('style'), { textContent: CAMERA_CSS }));
+
+  const boot = document.getElementById('boot');
+  const post = (msg) => { try { parent.postMessage(msg, '*'); } catch { /* not embedded */ } };
+
+  // Anything the embedder sends before the wasm is up would otherwise be dropped on the
+  // floor — and "the first open did nothing" is a hard bug to see.
+  let ready = false;
+  const queued = [];
+
+  window.addEventListener('message', (e) => {
+    if (e.source === window) {
+      // Coming OUT of the runtime: it posts to its own window so it does not have to know
+      // whether it is embedded.
+      if (typeof e.data === 'string') {
+        let parsed; try { parsed = JSON.parse(e.data); } catch { parsed = { type: 'log', message: e.data }; }
+        if (parsed.type === 'ready') { ready = true; boot.hidden = true; for (const q of queued) arbor_send(q); queued.length = 0; }
+        post(parsed);
+      }
+      return;
+    }
+    // Coming IN from the embedder. Traced out loud: the message has already crossed three
+    // hops to get here, and "did it arrive" is the only question worth asking first.
+    const text = typeof e.data === 'string' ? e.data : JSON.stringify(e.data);
+    let kind = '?'; try { kind = (JSON.parse(text) || {}).type ?? '?'; } catch {}
+    post({ type: 'log', message: `page: got '${kind}' (${text.length} bytes), ${ready ? 'delivering' : 'queued'}` });
+    if (ready) arbor_send(text); else queued.push(text);
+  });
+
+  // Camera commands go straight in — they are ours, not the embedder's, and queueing them
+  // behind readiness would drop a drag that started while the scene was still loading.
+  const send = (text) => { if (ready) arbor_send(text); else queued.push(text); };
+
+
+
+  // Camera commands go straight in — they are ours, not the embedder's, and holding them
+  // behind readiness would drop a drag that began while the scene was still loading.
+  installCameraControls({
+    canvas: document.getElementById('view'),
+    buttons: document.querySelector('.cam-controls'),
+    send: (text) => { if (ready) arbor_send(text); else queued.push(text); },
+  });
+
+  try {
+    await init();
+    arbor_start('#view');
+  } catch (err) {
+    boot.textContent = String(err);
+    post({ type: 'error', message: String(err) });
+  }
+</script>

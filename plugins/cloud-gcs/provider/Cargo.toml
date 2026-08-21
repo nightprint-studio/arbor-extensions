@@ -1,0 +1,17 @@
+[package]
+name        = "cloud-gcs-provider"
+version     = "2.0.0"
+edition.workspace = true
+license.workspace = true
+description = "GCS backend for Arbor's cloud panel — implements arbor:cloud/provider@1 as a wasm component."
+
+[lib]
+# A component is built as a cdylib and then adapted; the module name is what `[[provides]]`
+# names, with dashes as underscores the way cargo writes them.
+name       = "cloud_gcs"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }

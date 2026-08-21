@@ -1,0 +1,48 @@
+name        = "shader-preview"
+version     = "1.6.0"
+description = "Look at a WGSL material while you edit it — real Bevy lighting, on a turntable, with the parameters the shader itself declares on sliders."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "tools"
+keywords    = ["shader", "wgsl", "bevy", "preview", "material"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+# Lua and nothing else. The drawing is the bevy-runtime package's, the geometry is a
+# mesh-source extension's; this decides what to show and wires the two together. That is what
+# a plugin is for, and it is why this one is a few hundred lines of text rather than an engine.
+[lua]
+entry = "main.lua"
+
+[[dependencies]]
+name    = "bevy-runtime"
+version = ">=0.1.0"
+
+[[dependencies]]
+name    = "shader-preview-meshes"
+version = ">=1.0.0"
+
+[permissions]
+# Reading the shader the user asked to preview. Unrestricted because a shader lives wherever
+# the project is, and the user names the file.
+fs       = "write"
+fs_scope = ["*"]
+# Write, not read: saved looks live in `shader-previews.json` beside the shader. Nothing else
+# is written, and nothing outside the folder the shader came from.
+
+# `arbor.ext.call`, to ask the mesh source for geometry. Calling an extension is invoking
+# another package's code, so it is gated — see the Plugin Development docs.
+service_call = true
+
+# Without this the load hook never fires and nothing registers — the `[hooks]` table is a
+# filter, not documentation.
+[hooks]
+"arbor:plugin_load" = true
+# The view is rebuilt when it opens: panel content does not survive a plugin reload, so
+# without this the panel comes back blank after one.
+"arbor:view_open" = true
+# And closed, so the panel stops following the editor once nobody is looking at it.
+"arbor:view_close" = true
+# The editor moved to another file. An open preview follows it — without this the panel keeps
+# showing the shader you opened it on while you edit a different one.
+"bennu:file_opened" = true

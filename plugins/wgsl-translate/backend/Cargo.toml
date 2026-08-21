@@ -1,0 +1,16 @@
+[package]
+name        = "shader-preview-backend"
+version     = "1.0.0"
+edition.workspace = true
+license.workspace = true
+description = "WGSL → WebGL2 shader translation for Arbor's preview, as a wasm component."
+
+[lib]
+name       = "shader_preview_wgsl"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { workspace = true }
+# The whole reason this is a package rather than part of Arbor: a shading-language compiler
+# is a large dependency, and only the people who write shaders need it.
+naga = { version = "30", features = ["wgsl-in", "glsl-out"] }

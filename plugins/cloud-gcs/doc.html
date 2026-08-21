@@ -1,0 +1,58 @@
+<h1>Google Cloud Storage</h1>
+
+<p>
+  Adds GCS buckets to Arbor's cloud panel. This package is the <em>backend</em> — the panel,
+  the connection list and the settings form live in the <code>cloud-storage</code> package, which this
+  one depends on. Installing this without that one gives you a provider with nothing to drive
+  it; the Marketplace offers to install both.
+</p>
+
+<h2>Connecting</h2>
+<p>
+  Open <strong>Cloud → Connections → Add</strong>, pick Google Cloud Storage, and sign in. The
+  access token is stored in your operating system's keychain, never in a settings file and
+  never inside this package's folder.
+</p>
+
+<h2>Where the token comes from</h2>
+<p>
+  The cloud panel runs the sign-in and stores the result with
+  <code>arbor.credentials.set("oauth", token)</code> — into <em>this package's</em> slot, which
+  is the only one this backend can read. Nothing outside a package writes into its namespace,
+  including Arbor itself, so a connection made before this backend was installed needs one
+  reconnect before it can serve it.
+</p>
+<p>
+  Until then the panel keeps working: Arbor falls back to its own built-in implementation
+  rather than failing, so installing this package can never break a connection that was
+  already working.
+</p>
+
+<h2>What it can reach</h2>
+<p>
+  Exactly two things, both declared in its manifest and both shown to you when you install it:
+</p>
+<ul>
+  <li><strong>Network:</strong> <code>googleapis.com</code> and its subdomains. Nothing else —
+    a request to any other host is refused by Arbor before it is sent.</li>
+  <li><strong>One credential slot,</strong> the Google access token. It can read and write that
+    slot and no other, and it cannot name the credentials Arbor keeps for itself (your git
+    provider tokens, your issue-tracker keys) at all.</li>
+</ul>
+<p>
+  The backend is a sandboxed WebAssembly component: it has no filesystem, opens no sockets, and
+  never handles TLS. Every request is performed by Arbor on its behalf, which is what makes the
+  two limits above enforced rather than promised.
+</p>
+
+<h2>What it supports</h2>
+<table>
+  <thead><tr><th>Operation</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Browse</td><td>Folders are synthesised from key prefixes — object storage has no directories. A folder row has no size or date because there is none to report.</td></tr>
+    <tr><td>Download</td><td>Read in ranges, so progress and Cancel work exactly as they do without this package — the transfer is Arbor's, only the bytes come from here.</td></tr>
+    <tr><td>Upload</td><td>Whole-object, so files up to 64&nbsp;MB come through this backend and anything larger is streamed by Arbor's built-in path instead. The upload works either way; only which side moves the bytes changes.</td></tr>
+    <tr><td>Delete</td><td>Removing a key that is not there succeeds.</td></tr>
+    <tr><td>Copy</td><td>Server-side — the bytes never travel through your machine.</td></tr>
+  </tbody>
+</table>

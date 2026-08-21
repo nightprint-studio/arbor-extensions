@@ -1,0 +1,38 @@
+# Workspace for the packages in this repo that carry a compiled part.
+#
+# Most packages here are Lua and appear nowhere below — they have no Rust to build. A package
+# gains a member the moment it declares `[[provides]]`, because that declaration names a
+# module and a module is a build output.
+#
+# The `target/` this produces is gitignored and never shipped: a `.wasm` travels as a release
+# asset, verified against a digest the registry recorded. A binary committed to this repo
+# would be a binary nobody can review in the pull request that adds it.
+[workspace]
+resolver = "2"
+members = [
+    "plugins/cloud-gcs/provider",
+    "plugins/json-studio/backend",
+    "plugins/wgsl-translate/backend",
+    "plugins/shader-preview-meshes",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+# The guest side of the component model. Generates Rust from the WIT worlds in `wit/`.
+wit-bindgen = "0.36"
+# Every provider parses its store's JSON API. `alloc`-only: a guest has no filesystem and no
+# std features worth having beyond what wasip2 provides.
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+# A module travels over the network on install, so size is worth more here than the last few
+# percent of speed — these guests spend their time waiting on HTTP the host performs.
+opt-level     = "s"
+lto           = true
+codegen-units = 1
+strip         = true
+panic         = "abort"

@@ -1,0 +1,82 @@
+package arbor:extensions@1.0.0;
+
+// Geometry to draw a shader on.
+//
+// ## The smallest interface in the set, and the safest
+//
+// A mesh source imports nothing. No network, no secrets, no filesystem — it is a pure
+// function from parameters to vertices, and it is deterministic. That makes it the one place
+// where the sandbox costs nothing at all: there is no capability to weigh, only a contract.
+//
+// It is also the reason this exists as an interface rather than a table of primitives in
+// Arbor. A shader is written against geometry — a hex tile, a ramp, a crystal habit — and a
+// preview that can only offer a sphere is a preview of a different shader. The meshes that
+// matter are the ones in somebody's own engine, which Arbor will never ship and should never
+// need to see.
+//
+// ## Params as a schema, not as a struct
+//
+// `catalogue` returns a JSON Schema per mesh kind, and the host renders controls from it. So
+// a package can expose `geode` with `facets`, `roughness` and `seed`, and the panel draws
+// three controls without Arbor knowing what a geode is. The alternative — a fixed parameter
+// record — would mean every new mesh with a new knob is a new version of this file.
+//
+// The schema is the same shape the MCP tool surface already uses for its arguments, and for
+// the same reason: a description that lives beside the value cannot drift from it.
+interface mesh-types {
+  /// Triangles, indexed, in the layout a GPU wants.
+  ///
+  /// Flat lists of floats rather than a list of vertex records: a record per vertex would
+  /// cross the component boundary once per vertex, and a mesh worth previewing has tens of
+  /// thousands. Positions are xyz triples, normals xyz, uvs xy — so `positions.len()` is
+  /// three times the vertex count and the three lists agree on it.
+  record mesh-data {
+    positions: list<f32>,
+    /// Empty when the source does not compute them; the host derives flat normals instead.
+    normals: list<f32>,
+    /// Empty when the source has no parameterisation; the host binds zeroes.
+    uvs: list<f32>,
+    /// Triangle list. Empty means "the positions are already in draw order".
+    indices: list<u32>,
+  }
+
+  record mesh-kind {
+    /// Stable within the package. The host addresses a mesh as `<package>/<id>`, so two
+    /// packages offering `cube` do not collide and neither has to know about the other.
+    id: string,
+    /// What the picker shows.
+    label: string,
+    /// One line under the label. Empty for the obvious ones.
+    description: string,
+    /// JSON Schema (draft 2020-12) for the object `build` accepts. `{}` for a mesh with no
+    /// parameters, which is a schema that validates the empty object and needs no special
+    /// case anywhere.
+    params-schema: string,
+  }
+}
+
+interface mesh-source {
+  use mesh-types.{mesh-data, mesh-kind};
+
+  /// Every mesh this package offers.
+  ///
+  /// Called once when the package is loaded, so it must not be expensive: a package that
+  /// generated its meshes here to answer would generate all of them to answer one question.
+  catalogue: func() -> list<mesh-kind>;
+
+  /// Build one, from a JSON object matching its schema.
+  ///
+  /// `params` is `{}` for a mesh with no parameters. Errors are strings because there is
+  /// nothing a caller does differently between "no such id" and "facets must be at least 3" —
+  /// both are shown to the person who typed them.
+  build: func(id: string, params: string) -> result<mesh-data, string>;
+}
+
+/// The world a mesh source exports.
+///
+/// `log` is imported so a generator can explain itself when a parameter combination produces
+/// nothing; there is deliberately nothing else to import.
+world mesh-source-world {
+  import log;
+  export mesh-source;
+}

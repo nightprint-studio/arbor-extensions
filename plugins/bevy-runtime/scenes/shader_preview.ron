@@ -1,0 +1,85 @@
+// Shader preview — a material on a turntable, lit well enough to read a normal.
+//
+// The scene states the rig and leaves three holes for whoever opens it: the WGSL, the mesh,
+// and the material's vec4 at binding 100. Nothing here knows what the shader does, and the
+// runtime does not know this is a shader preview — it reads the document and builds it.
+//
+// The light rig is deliberate rather than pretty. One strong key from the front-left reads
+// the silhouette and the bump; a dim cool fill from behind-right keeps the shadow side from
+// going flat, which is where a perturbed normal stops being visible. Ambient is low for the
+// same reason: raise it and every micro-normal disappears into a wash.
+(
+    id: "shader_preview",
+    name: "Shader preview",
+    description: "One material, one mesh, a turntable and a two-light rig.",
+
+    camera: Orbit(
+        distance: Single(2.6),
+        pitch: 0.30,
+        // Slow: fast enough to see every face inside a few seconds, slow enough that a
+        // specular highlight can be watched moving across a surface.
+        auto_spin: Some(0.35),
+        fov: None,
+    ),
+
+    environment: (
+        background: (0.055, 0.062, 0.078),
+        ambient: 0.14,
+    ),
+
+    lights: [
+        Directional(
+            direction: (-0.45, -0.72, -0.52),
+            color: (1.0, 0.96, 0.90),
+            illuminance: 11000.0,
+        ),
+        Directional(
+            direction: (0.62, -0.25, 0.74),
+            color: (0.55, 0.66, 0.85),
+            illuminance: 2600.0,
+        ),
+    ],
+
+    entities: [
+        (
+            mesh: Param("mesh"),
+            material: Shader(
+                source: Param("shader"),
+                params: [ Param("p0"), Param("p1"), Param("p2"), Param("p3") ],
+                base_color: (0.62, 0.60, 0.57, 1.0),
+                perceptual_roughness: 0.85,
+                metallic: 0.0,
+            ),
+            position: (0.0, 0.0, 0.0),
+            scale: 1.0,
+            spin: 0.0,
+        ),
+    ],
+
+    controls: [
+        (
+            param: "p0",
+            label: "Params 0",
+            description: "The vec4 at binding 100.",
+            kind: Vec4(default: (2.4, 0.35, 0.6, 0.35)),
+        ),
+        (
+            param: "p1",
+            label: "Params 1",
+            description: "The vec4 at binding 101, when the shader declares one.",
+            kind: Vec4(default: (0.0, 0.0, 0.0, 0.0)),
+        ),
+        (
+            param: "p2",
+            label: "Params 2",
+            description: "The vec4 at binding 102.",
+            kind: Vec4(default: (0.0, 0.0, 0.0, 0.0)),
+        ),
+        (
+            param: "p3",
+            label: "Params 3",
+            description: "The vec4 at binding 103.",
+            kind: Vec4(default: (0.0, 0.0, 0.0, 0.0)),
+        ),
+    ],
+)

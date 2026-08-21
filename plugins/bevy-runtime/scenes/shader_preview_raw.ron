@@ -1,0 +1,63 @@
+// Shader preview — a material that owns its whole bind group.
+//
+// The sibling of `shader_preview.ron`, and the difference is not a setting: that one previews
+// a shader written to Bevy's convention — an extension of `StandardMaterial` with `vec4`s at
+// bindings 100 and up, lit by the rig below. This one previews a shader that declares its own
+// struct at binding 0 and returns colour and alpha from `fragment`. There is no
+// `StandardMaterial` underneath it to configure, so there is no base colour, no roughness and
+// no metallic here — and the lights are kept because a shader is free to read them, not
+// because this material is lit.
+//
+// The parameter block arrives as bytes under `data`, at the offsets its own struct implies.
+// Whoever opens this scene read them; the runtime uploads them and never learns a field name.
+(
+    id: "shader_preview_raw",
+    name: "Shader preview (own bind group)",
+    description: "One material that is entirely the caller's shader, on a turntable.",
+
+    camera: Orbit(
+        distance: Single(2.6),
+        pitch: 0.30,
+        auto_spin: Some(0.35),
+        fov: None,
+    ),
+
+    environment: (
+        background: (0.055, 0.062, 0.078),
+        ambient: 0.14,
+    ),
+
+    // Kept for a shader that samples them through `mesh_view_bindings`. An unlit material
+    // ignores them, which costs nothing and means one rig serves both scenes.
+    lights: [
+        Directional(
+            direction: (-0.45, -0.72, -0.52),
+            color: (1.0, 0.96, 0.90),
+            illuminance: 11000.0,
+        ),
+        Directional(
+            direction: (0.62, -0.25, 0.74),
+            color: (0.55, 0.66, 0.85),
+            illuminance: 2600.0,
+        ),
+    ],
+
+    entities: [
+        (
+            mesh: Param("mesh"),
+            material: Raw(
+                source: Param("shader"),
+                data: Param("data"),
+                // A shader that computes its own alpha almost always means it, and a
+                // translucent overlay rendered opaque reads as a bug in the shader rather
+                // than a setting in the viewer.
+                alpha: "blend",
+            ),
+            position: (0.0, 0.0, 0.0),
+            scale: 1.0,
+            spin: 0.0,
+        ),
+    ],
+
+    controls: [],
+)

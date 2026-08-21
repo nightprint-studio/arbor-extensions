@@ -1,0 +1,289 @@
+<h1>Shader preview</h1>
+
+<p>
+  Opens a WGSL material in a viewport and keeps it there while you edit: turntable, a two-light
+  rig you can tune, and the parameters the shader itself declares on sliders. Every control is
+  live — there is nothing to press to see what you just changed.
+</p>
+
+<h2>Opening it</h2>
+<p>
+  With a <code>.wgsl</code> file open, the eye button on the editor's toolbar previews
+  <em>that</em> file — the toolbar only shows it on shader files, so its presence is also the
+  answer to "is this previewable". From anywhere else, the command palette
+  (<kbd>Ctrl</kbd>+<kbd>K</kbd>) has <em>Shader: preview a WGSL material</em>, which asks
+  which file: from a palette there is no "this one".
+</p>
+<p>
+  It opens as a panel beside the editor, not as a dialog. A preview has nothing to submit and
+  nothing to cancel, and a dialog would cover the shader you are editing with a picture of it.
+  Drag the divider to give the viewport more room; the parameters sit under it.
+</p>
+
+<h2>It is real Bevy</h2>
+<p>
+  The shader is compiled by Bevy, not translated. <code>#import bevy_pbr::…</code> resolves
+  against the actual shader library, <code>apply_pbr_lighting</code> is the actual function,
+  and the frame you are looking at is the frame that ships. A preview that approximated the
+  lighting would be a picture of a different shader — which is exactly the thing worth being
+  sure about when you are tuning a normal perturbation.
+</p>
+
+<h2>Parameters</h2>
+<p>
+  The panel offers <em>the parameters your shader declares</em>, by name. Bennu reads the
+  material's bind group — the struct, its fields, their types and the byte offset of each — and
+  the panel builds a control per field: a colour picker for something called
+  <code>sand_color</code>, a slider for <code>grain_strength</code>, four lanes for a
+  <code>vec3</code>. A matrix is listed but not editable, and textures and samplers are shown
+  under <em>Also bound</em> so nothing the material needs is silently missing.
+</p>
+<p>
+  Nothing here parses WGSL. That work belongs to the editor that already does it for
+  highlighting and for checking a material's Rust half against its shader half, and asking it
+  is why a field renamed in the shader is renamed in the panel by reloading.
+</p>
+<p>
+  Moving a control sends new bytes for the material's uniform and nothing else — the shader is
+  not recompiled, the mesh is not rebuilt, the camera does not jump back. <strong>Random
+  params</strong> puts every control somewhere inside its own range and <em>moves the
+  controls</em> while it does: a panel that sends numbers its own fields do not show has
+  stopped describing what you are looking at.
+</p>
+<p>
+  <strong>Reload</strong> is for the file, not for the panel: it re-reads the shader from disk
+  and recompiles it, keeping the values you have found for every field that still exists with
+  the shape it had.
+</p>
+
+<h2>Naming the lanes yourself</h2>
+<p>
+  A material extension binds a <code>vec4</code> and packs four unrelated things into it. WGSL
+  gives them one name, so the panel offers <code>X Y Z W</code> and a range guessed from the
+  variable. Say what they are in a comment above the declaration and it uses that instead:
+</p>
+<pre><code>// @preview grain_freq 0.2..8 = 1.6
+// @preview albedo_splotch 0..1 = 0.45
+// @preview bump 0..1 = 0.65
+// @preview band_freq 0..2 = 0.22</code></pre>
+<p>
+  One line per lane, in order: <code>@preview &lt;label&gt; [&lt;min&gt;..&lt;max&gt;] [= &lt;default&gt;] [: &lt;hint&gt;]</code>.
+  Each lane becomes its own control, with its own range and the value you said it opens on.
+  Everything after the label is optional.
+</p>
+<p>
+  It is a comment because it has to be: WGSL rejects any attribute outside its own list, so a
+  custom one would stop the shader compiling. The editor highlights these lines apart from
+  ordinary comments. A shader without them previews exactly as it did.
+</p>
+
+<h2>The examples</h2>
+<p>
+  Five materials ship with this package: <strong>magma</strong>, <strong>waterfall</strong>,
+  <strong>kaleidoscope</strong>, <strong>nebula</strong> and <strong>gerstner_waves</strong>. Open one from the Command Palette —
+  <em>Shader preview: open an example</em> — or from the picker, in the package's
+  <code>examples/</code> folder.
+</p>
+<p>
+  They exist to be read. Each is one technique carried far enough to look like something:
+  domain warping for the magma's flow, anisotropic noise for the waterfall's filaments, angular
+  folding for the kaleidoscope, ridged noise for the nebula's dust lanes. Every lane is
+  annotated, so opening one fills the panel with named controls — and the quickest way to
+  understand a technique is to drag it until it breaks.
+</p>
+<p>
+  A fifth, <strong>gerstner_waves</strong>, is the one that moves the geometry: it carries its
+  own <code>@vertex</code> stage and displaces the mesh into peaked swells. Water particles
+  travel in circles rather than up and down, which piles the surface into sharp crests with long
+  flat troughs — a silhouette you cannot fake in the fragment stage, because it is shape.
+</p>
+<p>
+  A shader that declares a <code>@vertex fn vertex(…)</code> is noticed and built as a different
+  material. That is not a setting: <code>Material::vertex_shader</code> is a static method, so a
+  material type either always overrides the vertex stage or never does, and picking wrongly
+  either ignores your stage in silence or fails to compile. Turn the mesh's tessellation up —
+  four corners have nothing to displace.
+</p>
+<p>
+  None of them is copied from anywhere: they are the standard techniques, written out with the
+  reasoning in the comments.
+</p>
+
+<h2>Stopping the clock</h2>
+<p>
+  The gesture this panel is for is <em>change one number, look at the difference</em>. On a
+  material that animates — a spiral that turns, water that ripples — that does not work while
+  the clock runs: between the before and the after everything else has moved too.
+</p>
+<p>
+  So it stops. <strong>Pause</strong> pins the instant, the arrows step a twentieth of a second
+  either way, and the <code>t</code> slider scrubs. Scrubbing implies pausing, because a running
+  clock is recomputed every frame and would overwrite the instant before anything is drawn — the
+  slider is greyed out while it runs rather than silently doing nothing.
+</p>
+
+<h2>Textures</h2>
+<p>
+  A material that samples textures previews too. There are no assets behind them — the atlas
+  your game feeds it lives in a project the viewport cannot reach — so each texture is filled
+  with an image the runtime generates, and the panel gives you one row per texture to say
+  which: a chequer, flat white, mid grey, a flat normal, tiling noise, or the UV coordinates
+  themselves.
+</p>
+<p>
+  One row per <strong>kind</strong>, not per variable. <code>top_normal</code> and
+  <code>side_normal</code> are the same sort of thing, and with no assets behind them both
+  would get the same generated picture — so they share a row and a slot, and the row names the
+  variables it covers. That is also what makes a ten-texture material fit a viewport with four
+  slots.
+</p>
+<p>
+  The kind is read from the variable's name — <code>top_normal</code> is a normal,
+  <code>side_height</code> a height, <code>top_pbr</code> a pbr map — and each opens on the
+  picture that means <em>nothing happened</em> for that kind. Say it outright with a
+  <code>// @preview</code> line above the declaration, the same way lanes are named:
+</p>
+<pre><code>// @preview normal
+@group(#{MATERIAL_BIND_GROUP}) @binding(104)
+var top_normal: texture_2d&lt;f32&gt;;</code></pre>
+<p>
+  Write <code>normal.top</code> and <code>normal.side</code> if you want the two faces on their
+  own rows and their own slots — the key is whatever the annotation says.
+</p>
+<p>
+  <strong>UV</strong> is the diagnostic one. A material driven by an atlas is given rectangles
+  the game computes per tile, and a preview has none of them — so the first question is always
+  whether it is sampling the wrong part of the atlas rather than sampling it wrongly. Painting
+  the coordinates answers it.
+</p>
+<p>
+  How this works is worth a sentence, because it looks impossible: a viewer's bind-group layout
+  is decided when the <em>viewer</em> is compiled, so it cannot grow a sampler at binding 101
+  because your shader wants one there. Instead the shader is renumbered — a copy, with the
+  numbers inside <code>@binding(…)</code> moved onto slots that exist, and nothing else
+  touched. Your file is not modified.
+</p>
+<p>
+  A few things no renumbering reaches: storage buffers, storage textures, comparison samplers
+  and depth textures, all filled by a pass this preview does not run. Those are named, with the
+  reason, instead of the viewport dying.
+</p>
+<p>
+  How many slots there are depends on where you are looking. A fragment stage in the browser
+  gets sixteen texture units in total, across every bind group, and the engine has spent most
+  of them before the material is reached — so this panel has four, and the headless renderer
+  behind <code>bennu_shader_render</code> has twelve. A material with more kinds than the panel
+  has says so on the row that lost out.
+</p>
+
+<h2>Looks</h2>
+<p>
+  Finding the values that make a material read well <em>is</em> the work, so they are kept.
+  Name a set and press <strong>Save</strong>; pick one from the list to switch; the last one
+  you used opens by itself the next time you preview that material.
+</p>
+<p>
+  A look holds the parameters, the <strong>light rig</strong> and the <strong>mesh</strong> —
+  all three, because tuning a material is in large part tuning the light on it, and a term that
+  reads right on a sphere can be wrong in a saddle. A look that remembered only the numbers
+  would put them back under a different lamp on a different shape, which is a different picture
+  and no longer the thing you saved. Looks written before this still load; they simply have no
+  rig to restore, and what is on screen is left alone.
+</p>
+
+<h2>Getting the numbers back into Rust</h2>
+<p>
+  <strong>Copy as Rust</strong>, under the parameters, gives you the struct literal for the
+  material's <code>Default</code> impl. It is built from the packed uniform buffer rather than
+  from the controls, which is what makes it right: a <code>vec4</code> with four
+  <code>@preview</code> lanes is four sliders, a padding lane is no slider at all, and a matrix
+  is one control holding nine numbers — the packing already knows where each value belongs, and
+  reading it back by member gives the shape the Rust side declares.
+</p>
+
+<h2>From the keyboard</h2>
+<p>
+  Every action here has a Command Palette entry: preview, reload, pause, random parameters,
+  reset camera, save look. Two have keys — <kbd>Alt+Shift+P</kbd> to preview the shader you are
+  editing, <kbd>Alt+Shift+R</kbd> to reload it. <kbd>Alt+Shift+P</kbd> does not ask which file
+  when the editor is already on one.
+</p>
+<p>
+  They live in <code>shader-previews.json</code> beside the shader — one file per folder, keyed
+  by the struct the shader declares, so a shader that is moved or renamed keeps its looks. In
+  the project rather than in a settings folder because a look is worth committing: it is work
+  about a file, and worth showing someone else.
+</p>
+
+<h2>Two kinds of material</h2>
+<p>
+  A shader written to Bevy's convention — an extension of <code>StandardMaterial</code> with
+  <code>vec4</code>s at bindings 100 and up — is previewed lit, on the rig below. A shader that
+  declares its own struct at binding 0 and returns colour and alpha from <code>fragment</code>
+  owns the whole bind group, so it is previewed as itself, with no PBR underneath. Which one
+  you get follows from the shader; there is no setting.
+</p>
+<p>
+  The lit one has a <strong>Blend</strong> control under Material. An extension inherits its
+  blend mode from the <code>StandardMaterial</code> underneath, and Bevy's default is opaque —
+  so a shader that computes its own alpha renders as a sheet of paint until you say
+  <em>blend</em>, which looks like the alpha never happened rather than like a setting being
+  wrong.
+</p>
+
+<h2>The rig</h2>
+<p>
+  Tuning a material is mostly tuning the light on it: a normal perturbation that reads
+  beautifully under one key light disappears under another. So the rig is knobs too —
+  <em>Environment</em> (background, ambient), <em>Key light</em> and <em>Fill light</em>
+  (direction, colour, illuminance), and for a lit material a <em>Material</em> group with base
+  colour, roughness and metallic. Every group folds; the ones you rarely touch open folded.
+</p>
+<p>
+  <em>Backdrop grid</em>, in the Environment group and on by default, puts a chequerboard
+  behind the material instead of a flat fill. It is not decoration: a material that computes
+  its own alpha looks identical over any single colour — you cannot tell 60% opacity from 100%
+  until there is something behind it with structure. The squares are made from the Background
+  colour, so that control still sets the ground they sit on.
+</p>
+<p>
+  Under <em>Camera</em> there is one field, the distance, because everything else about the
+  camera is already on the picture: drag to orbit, wheel to zoom, and the buttons floating over
+  the viewport stop the turntable or put the framing back. A distance is the one thing worth a
+  field, because it is a number you can read and return to.
+</p>
+
+<h2>Meshes</h2>
+<p>
+  Sphere, cube, plane and torus come from the <code>shader-preview-meshes</code> package. A
+  sphere shows a lighting term from every angle, a cube shows a hard normal discontinuity, and
+  a torus is the cheapest shape with both curvature signs — a term that reads right on a sphere
+  and wrong in a saddle shows the difference there and nowhere else.
+</p>
+<p>
+  A shape that has knobs shows them: the sphere and the torus take a tessellation level, and
+  turning it down until the silhouette facets is how you tell a shader that is wrong from a
+  mesh that is too coarse for it. The controls come from the package's own declaration, so a
+  mesh source you write yourself gets its form for free.
+</p>
+<p>
+  Every mesh carries <strong>tangents</strong> and a <strong>second UV channel</strong>, so a
+  material that branches on <code>VERTEX_TANGENTS</code> or <code>VERTEX_UVS_B</code> takes the
+  branch it takes in the game rather than its fallback. The second channel is derived from the
+  shape — it reads as depth, 1 in the middle and 0 at the rim, which on a plane is a pond. It
+  is not your baked data, but it is in the right range, and the alternative is a material
+  quietly showing you the version of itself from before that channel existed.
+</p>
+<p>
+  To preview on your <em>own</em> geometry, build a second <code>mesh-source</code> package
+  from your engine's crates and drop it in your plugins folder. It appears in the picker beside
+  these. It never has to be published: a package is a folder with a <code>plugin.toml</code>,
+  and the registry is how other people find one — not how Arbor loads one.
+</p>
+
+<h2>What it can reach</h2>
+<p>
+  Reading the shader file you point it at, and calling the mesh source. It has no network
+  access and stores no credentials. The viewport itself runs in a frame with an opaque origin —
+  no storage, no cookies, no reach into the application around it.
+</p>

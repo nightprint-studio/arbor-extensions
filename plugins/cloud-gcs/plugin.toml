@@ -1,0 +1,37 @@
+name        = "cloud-gcs"
+version     = "1.0.0"
+description = "Google Cloud Storage buckets for Arbor's cloud panel."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["cloud", "gcs", "google", "storage"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+# No [lua] section: this package is a provider and nothing else. Its UI — the connections
+# panel, the settings form — lives in the package it depends on.
+
+[[dependencies]]
+name    = "cloud-storage"
+version = ">=1.0.0"
+
+[permissions]
+# Only what this provider actually reaches. Entries are bare domains and cover their
+# subdomains, so `googleapis.com` includes `storage.googleapis.com` — a `*.` prefix would be
+# read as a literal label and match nothing.
+network = ["googleapis.com"]
+
+# The OAuth access token, in the OS keychain. This package can read and write this slot and no
+# other, and cannot name Arbor's own credentials at all.
+[[credentials]]
+key   = "oauth"
+label = "Google Cloud access token"
+
+[[provides]]
+interface = "cloud-provider"
+version   = 1
+id        = "gcs"
+module    = "cloud_gcs.wasm"
+
+[wasm]
+target = "wasm32-wasip2"
