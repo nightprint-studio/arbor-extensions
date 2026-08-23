@@ -26,7 +26,8 @@
 //!
 //! ```text
 //! arbor-shader-render --shader m.wgsl --out /tmp/m.png \
-//!     [--data 1.0,0.5,...] [--mesh sphere|cube|plane|torus] [--time 2.5] \
+//!     [--data 1.0,0.5,...] [--mesh sphere|cube|plane|torus] [--mesh-file verts.json] \
+//!     [--time 2.5] \
 //!     [--size 640x640] [--alpha blend] [--checker on|off] [--extension] [--vertex] \
 //!     [--distance 2.6] [--pitch 0.3] [--background r,g,b]
 //! ```
@@ -100,6 +101,12 @@ struct Args {
     out: Option<PathBuf>,
     data: Vec<f32>,
     mesh: String,
+    /// Vertices to draw instead of a built-in shape — a JSON object with `positions` and
+    /// optionally `normals`, `uvs`, `uvs_b`, `tangents`, `indices`.
+    ///
+    /// A file and not a flag's value: a mesh worth previewing is tens of thousands of floats,
+    /// which is past what a command line will carry on any platform. Wins over `--mesh`.
+    mesh_file: Option<PathBuf>,
     time: f32,
     width: u32,
     height: u32,
@@ -129,6 +136,7 @@ impl Default for Args {
             out: None,
             data: Vec::new(),
             mesh: "sphere".into(),
+            mesh_file: None,
             time: 0.0,
             width: 512,
             height: 512,
@@ -176,6 +184,7 @@ fn parse_args() -> Result<Args, String> {
             "--out" => a.out = Some(PathBuf::from(value!())),
             "--data" => a.data = parse_floats(&value!()),
             "--mesh" => a.mesh = value!().to_ascii_lowercase(),
+            "--mesh-file" => a.mesh_file = Some(PathBuf::from(value!())),
             "--alpha" => a.alpha = value!().to_ascii_lowercase(),
             // One role per texture slot, in the order the shader's textures were renumbered:
             // `white`, `black`, `grey`, `normal`, `checker`, `noise`, `uv`. A preview has no
@@ -334,22 +343,60 @@ fn scene_ron(a: &Args) -> String {
     )
 }
 
-fn primitive_name(mesh: &str) -> &'static str {
-    match mesh {
+/// The built-in shape by that name, or `None`.
+///
+/// `None` and not a fallback to `Sphere`. A name this does not know is a caller asking for
+/// geometry that is not here, and answering with a sphere renders a picture of a DIFFERENT
+/// question while reporting success — which is how `--mesh fulcrum/flame` used to come back
+/// as a sphere with nothing anywhere saying the name had been discarded.
+fn primitive_name(mesh: &str) -> Option<&'static str> {
+    Some(match mesh {
+        "sphere" => "Sphere",
         "cube" => "Cube",
         "plane" => "Plane",
         "torus" => "Torus",
         "capsule" => "Capsule",
         "cylinder" => "Cylinder",
-        _ => "Sphere",
+        _ => return None,
+    })
+}
+
+/// What goes in the document's `mesh` slot: a built-in shape, or the vertices from a file.
+///
+/// The file wins when both are given. It is read and re-encoded rather than spliced in as
+/// text so a malformed one fails HERE, naming the file, instead of inside a RON parse that
+/// would blame the generated document.
+fn resolve_mesh(a: &Args) -> Result<serde_json::Value, String> {
+    if let Some(path) = &a.mesh_file {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read the mesh file {}: {e}", path.display()))?;
+        let raw: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|e| format!("{} is not valid JSON: {e}", path.display()))?;
+        if !raw.get("positions").is_some_and(|p| p.is_array()) {
+            return Err(format!(
+                "{} has no `positions` array — a mesh with no vertices is not a mesh",
+                path.display()
+            ));
+        }
+        return Ok(serde_json::json!({ "Raw": raw }));
     }
+
+    let name = primitive_name(&a.mesh).ok_or_else(|| {
+        format!(
+            "'{}' is not a built-in shape. Built-ins are sphere, cube, plane, torus, capsule, \
+             cylinder; anything else is geometry a package makes, and reaches this binary as \
+             `--mesh-file`.",
+            a.mesh,
+        )
+    })?;
+    Ok(serde_json::json!({ "Primitive": name }))
 }
 
 /// The values the document's `Param(...)` slots read.
-fn params_for(a: &Args, source: String) -> serde_json::Value {
+fn params_for(a: &Args, source: String, mesh: serde_json::Value) -> serde_json::Value {
     let mut p = serde_json::json!({
         "shader": source,
-        "mesh": { "Primitive": primitive_name(&a.mesh) },
+        "mesh": mesh,
         "textures": a.textures,
     });
 
@@ -404,9 +451,19 @@ fn main() {
         }
     };
 
+    // The geometry, decided before the app is built so a bad name ends the run with a
+    // sentence rather than with a picture of the wrong shape.
+    let mesh = match resolve_mesh(&args) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("arbor-shader-render: {e}");
+            std::process::exit(2);
+        }
+    };
+
     let job = Job {
         doc: scene_ron(&args),
-        params: params_for(&args, source),
+        params: params_for(&args, source, mesh),
         out: args.out.clone().unwrap(),
         width: args.width,
         height: args.height,
