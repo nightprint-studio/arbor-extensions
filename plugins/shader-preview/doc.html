@@ -183,6 +183,11 @@ var top_normal: texture_2d&lt;f32&gt;;</code></pre>
   you used opens by itself the next time you preview that material.
 </p>
 <p>
+  <strong>Look</strong> is its own section, above the parameters, because a look is not one of
+  them: restoring one moves the parameters, the light rig and the mesh at once, so it sits above
+  all three rather than inside the first.
+</p>
+<p>
   A look holds the parameters, the <strong>light rig</strong> and the <strong>mesh</strong> —
   all three, because tuning a material is in large part tuning the light on it, and a term that
   reads right on a sphere can be wrong in a saddle. A look that remembered only the numbers

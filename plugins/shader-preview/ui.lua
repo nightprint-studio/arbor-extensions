@@ -166,7 +166,7 @@ local function control_for(f, value, params)
   return vec_row(f.name, label, value, f, "shader_preview:param")
 end
 
--- ── The template bar ─────────────────────────────────────────────────────────
+-- ── The Look section ─────────────────────────────────────────────────────────
 --
 -- Many looks per material, and the last one used opens by itself. Two gestures, both cheap:
 -- pick from the list to switch, or type a name and press Save to keep what is on screen.
@@ -174,6 +174,12 @@ end
 -- The name is an input node rather than a dialog: the working agreement rules the browser's
 -- prompts out entirely, and a field beside the button is the version that also lets Enter
 -- finish the job.
+--
+-- Its own section, and not a row on top of the parameters, because a look is not a parameter:
+-- it carries the light rig and the mesh too, so restoring one changes three sections at once
+-- and belongs above all of them rather than inside one. Sitting under the parameter caption
+-- also read as *a parameter called Look*, which is the one thing it is not.
+
 --- The name this material's saved looks are filed under — see `mat_key` in `main.lua`.
 local function mat_key(state)
   local d = state.desc or {}
@@ -182,7 +188,7 @@ local function mat_key(state)
   return "material"
 end
 
-local function template_bar(state, templates)
+local function template_section(state, templates)
   local names = templates.names(state.path, mat_key(state))
   local current = templates.preferred(state.path, mat_key(state))
 
@@ -194,7 +200,7 @@ local function template_bar(state, templates)
     for i, n in ipairs(names) do options[i] = { value = n, label = n } end
   end
 
-  return {
+  local bar = {
     type     = "row",
     gap      = 6,
     align    = "end",
@@ -203,7 +209,6 @@ local function template_bar(state, templates)
         type    = "select",
         id      = "template_pick",
         name    = "template_pick",
-        label   = "Look",
         default = current,
         -- Says what the state IS rather than sitting blank: "nothing saved yet" is an answer,
         -- an empty dropdown is a puzzle.
@@ -243,6 +248,10 @@ local function template_bar(state, templates)
       },
     },
   }
+
+  -- Open, always. A section you fold is one you consult; this is the one you arrive at, and a
+  -- folded caption would hide the fact that the material HAS saved looks.
+  return section("look", "Look", (#names > 0) and tostring(#names) or nil, false, { bar })
 end
 
 -- ── Groups ───────────────────────────────────────────────────────────────────
@@ -616,6 +625,8 @@ function M.build(state, deps)
       fields[#fields + 1] = control_for(f, state.values[f.name], params)
     end
 
+    nodes[#nodes + 1] = template_section(state, templates)
+
     nodes[#nodes + 1] = section(
       "params", "Shader parameters",
       -- Named after what the SHADER called it. The whole point of asking Bennu is that a panel
@@ -624,7 +635,6 @@ function M.build(state, deps)
       mat_key(state) .. " · " .. #state.fields,
       false,
       {
-        template_bar(state, templates),
         rows("param_body", fields),
         -- The last mile. Tuning happens here and the numbers live in Rust, and without this
         -- the final gesture is reading eleven floats off a panel and typing them into a

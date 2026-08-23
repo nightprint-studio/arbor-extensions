@@ -1,5 +1,5 @@
 name        = "shader-preview"
-version     = "1.6.0"
+version     = "1.6.1"
 description = "Look at a WGSL material while you edit it — real Bevy lighting, on a turntable, with the parameters the shader itself declares on sliders."
 author      = "Nightprint Studio"
 repository  = "https://github.com/nightprint-studio/arbor-extensions"
