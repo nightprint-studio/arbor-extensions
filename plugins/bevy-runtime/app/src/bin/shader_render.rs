@@ -42,6 +42,7 @@ use std::time::Duration;
 use bevy::{
     app::{AppExit, ScheduleRunnerPlugin},
     camera::RenderTarget,
+    log::{Level, LogPlugin},
     prelude::*,
     render::{
         render_resource::TextureFormat,
@@ -427,7 +428,17 @@ fn main() {
                 })
                 // Panics on a machine with no display server, and there is nothing for it to
                 // do here anyway.
-                .disable::<WinitPlugin>(),
+                .disable::<WinitPlugin>()
+                // ERRORS ONLY, and that is a decision rather than tidiness. The caller decides
+                // "did this compile" by looking for the word `error` in stderr, so every line
+                // that reaches it is read as a verdict: one INFO line naming an error type
+                // would fail a render that succeeded. At this level the stream is empty for a
+                // good run and carries naga's own message, with its line numbers, for a bad one.
+                .set(LogPlugin {
+                    level: Level::ERROR,
+                    filter: "error,wgpu=error,naga=error".to_string(),
+                    ..default()
+                }),
         )
         .init_resource::<RoleImages>()
         .add_plugins(MaterialPlugin::<PreviewMaterial>::default())

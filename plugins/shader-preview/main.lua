@@ -99,7 +99,10 @@ local function mat_key()
   if not state.desc then return "" end
   local k = state.desc.key
   if type(k) == "string" and k ~= "" then return k end
-  local s = mat_key()
+  -- `state.desc.struct`, NON `mat_key()`: era una chiamata a se' stessa, cioe' ricorsione
+  -- infinita su ogni shader il cui descrittore ha `struct` ma non `key` — che e' proprio il
+  -- ramo che questa riga esiste per coprire (vedi il filtro `desc.key or desc.struct`).
+  local s = state.desc.struct
   if type(s) == "string" and s ~= "" then return s end
   return "material"
 end

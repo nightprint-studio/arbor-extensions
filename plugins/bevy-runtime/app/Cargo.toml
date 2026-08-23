@@ -49,7 +49,13 @@ default = []
 # `png` is what `save_to_disk` needs to encode the capture. Enabled only for the native
 # renderer, so the bundle that travels over a network on install does not carry an encoder
 # nothing in the browser calls.
-native-render = ["bevy/png"]
+#
+# `bevy_log` is what makes a broken shader SAYABLE. wgpu answers a pipeline it cannot build by
+# logging and drawing nothing, so without a `LogPlugin` the run is indistinguishable from a
+# material that renders to nothing: exit 0, an empty picture, and not one line anywhere. The
+# caller (`bennu_shader_render`) reads stderr for exactly those lines — this is the half of that
+# contract that lives here. Native only: in the browser the console already has them.
+native-render = ["bevy/png", "bevy/bevy_log"]
 
 [profile.release]
 # A viewer's frame time matters more than its size here, but the bundle travels over a network

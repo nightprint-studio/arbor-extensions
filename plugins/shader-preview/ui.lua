@@ -262,7 +262,12 @@ local function mesh_row(f, value)
       hint    = f.hint,
       default = tostring(value or f.default),
       options = f.options,
-      actions = { change = "shader_preview:mesh_param" },
+      -- La stessa forma dello slider qui sotto, e non la stringa nuda: solo il dispatch
+      -- scoped porta `node_id`, e il gestore ne ha bisogno per sapere QUALE parametro e'
+      -- cambiato (`mesh.<nome>`). Con la stringa nuda il gestore usciva subito, quindi la
+      -- combobox si muoveva e la mesh no — mentre gli slider, che gia' usavano questa forma,
+      -- funzionavano. Due grafie per lo stesso slot, una sola delle due dice cosa e' successo.
+      actions = { change = { kind = "action", name = "shader_preview:mesh_param" } },
       style   = FIELD_COLUMN,
     }
   end
