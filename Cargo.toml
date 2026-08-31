@@ -10,6 +10,11 @@
 [workspace]
 resolver = "2"
 members = [
+    # The shared object-storage logic, and the component that publishes it. A crate rather
+    # than a copy in each provider: a guest cannot call another guest, so a provider LINKS
+    # this and the Lua panel CALLS the component — one implementation either way.
+    "crates/cloud-common",
+    "plugins/cloud-toolkit/component",
     "plugins/cloud-gcs/provider",
     "plugins/json-studio/backend",
     "plugins/wgsl-translate/backend",

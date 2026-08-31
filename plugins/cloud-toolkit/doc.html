@@ -1,0 +1,87 @@
+<h1>Cloud Toolkit</h1>
+
+<p>
+  The parts of object storage that are the same whichever store you use: splitting keys,
+  matching wildcards, working out which byte ranges a large transfer needs, and deciding what a
+  sync would actually do. It talks to nothing — it only computes.
+</p>
+
+<p>
+  You install it because the cloud panel asks for it, not because it does anything on its own.
+  It has no panel, no settings and no commands.
+</p>
+
+<h2>What it can reach</h2>
+<p>
+  <strong>Nothing.</strong> No network, no filesystem, no credential slots — its manifest
+  declares no permissions at all, and there is nothing to grant it. A package that only
+  computes cannot be talked into reaching something.
+</p>
+
+<h2>What it provides</h2>
+<table>
+  <thead><tr><th>Function</th><th>What it answers</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>plan-ranges</code></td>
+      <td>The byte ranges a transfer of a given size should ask for. The last one is short
+        rather than past the end; an empty object plans nothing.</td>
+    </tr>
+    <tr>
+      <td><code>glob-match</code></td>
+      <td>Whether a key matches a pattern. <code>?</code> is one character and <code>*</code>
+        any run — neither crossing <code>/</code> — while <code>**</code> crosses, so a search
+        in one folder stays there unless you ask otherwise.</td>
+    </tr>
+    <tr>
+      <td><code>order-chunks</code></td>
+      <td>Split parts in the order they were split in, by number or by date. Stores list
+        lexicographically, where <code>part10</code> comes before <code>part2</code> — which
+        concatenates a split archive into a corrupt file.</td>
+    </tr>
+    <tr>
+      <td><code>sync-plan</code></td>
+      <td>What a download would create, update, skip or delete, and how many bytes that moves
+        — decided before anything is transferred, so it can be shown to you first. Compares on
+        size, modification time and etag; never reads a file's contents.</td>
+    </tr>
+    <tr>
+      <td><code>split-key</code> · <code>join-key</code> · <code>parent-prefix</code></td>
+      <td>Key handling that treats <code>a/b/c.txt</code> as one key with slashes in it, which
+        is what it is.</td>
+    </tr>
+    <tr>
+      <td><code>encode-segment</code> · <code>rfc3339-secs</code></td>
+      <td>URL encoding for keys, and the timestamp format every store answers in.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Why it exists as a package</h2>
+<p>
+  None of this is Arbor's to know. A host that carried it would be a host that had learned what
+  a bucket is, and at that point the cloud stops being a plugin and becomes a built-in feature
+  with a plugin attached.
+</p>
+<p>
+  It is also not a provider: a provider talks to one service, and this talks to none. It is the
+  shared library both sides use — a provider compiles it in, and the panel calls this component
+  — so the two can never disagree about what <code>part10</code> sorts after.
+</p>
+
+<h2>Calling it from a plugin</h2>
+<p>
+  Through the extension seam, like any other package:
+</p>
+<pre><code>local plan = arbor.ext.call{
+  interface = "cloud-util", id = "core", method = "sync-plan",
+  args = { remote, local_files, { overwrite = "if-newer", ["delete-extraneous"] = false } },
+}
+for _, action in ipairs(plan.actions) do
+  -- action.create / update / skip / delete
+end</code></pre>
+<p>
+  Calling an extension needs <code>service_call</code> in your own package's
+  <code>[permissions]</code>: it is invoking another package's code, and that is the permission
+  that says so.
+</p>

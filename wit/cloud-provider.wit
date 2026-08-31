@@ -1,7 +1,6 @@
 package arbor:extensions@1.0.0;
 
-// A cloud object-storage provider: what it takes to make a bucket browsable in the file
-// explorer.
+// A cloud object-storage provider: what it takes to make a bucket browsable.
 //
 // ## Coarse on purpose, and it comes by it honestly
 //
@@ -10,8 +9,24 @@ package arbor:extensions@1.0.0;
 // payloads, every one of them already a network round trip. The cost of the component
 // boundary disappears next to the cost of the request it wraps.
 //
-// That is why this is the right guest to prove the runtime on, even though it is the one
-// that needs capabilities: there is no shape question left to get wrong.
+// ## Whole calls, not a connection
+//
+// This interface used to open a `connection` resource and hang the operations off it. That
+// read well and made the package unreachable: a resource is a handle into one store's memory,
+// so it cannot cross a JSON boundary, and the *only* caller that could hold one was Arbor
+// itself, calling through generated bindings — which meant Arbor had to carry this contract,
+// generate against it, and route to it. Exactly the arrangement that makes a wasm file an
+// implementation detail of a built-in rather than an extension. **If the host has to learn
+// something, it is not a plugin.**
+//
+// So every function carries `bucket` and `config` and answers on its own. The cost is that a
+// provider re-derives its authentication per call; the fix for that belongs inside the guest,
+// which may cache whatever it likes across calls in its own module state — and a token read
+// is a host call, not a round trip.
+//
+// The caller is now the plugin, in Lua, through `arbor.ext.call` — and for the payload-shaped
+// ones, `arbor.ext.call_to_file` / `call_from_file`, which move bytes between the guest and a
+// local file without them ever becoming JSON.
 //
 // ## The guest does not hold the credential
 //
@@ -55,6 +70,27 @@ interface cloud-types {
     end: option<u64>,
   }
 
+  /// Which bucket, and the provider's own configuration for reaching it.
+  ///
+  /// `config` is opaque to the host — endpoint, region, whichever of them this provider needs
+  /// — because the host has no business knowing what an S3 region is; the settings panel that
+  /// produced it belongs to the same package. Credentials are NOT in here: the provider
+  /// fetches them by key from `arbor:host/secrets`, which is what keeps a token out of a
+  /// config file.
+  record target {
+    bucket: string,
+    config: string,
+  }
+
+  /// An access token and how long it stays usable.
+  ///
+  /// `expires-in` is SECONDS FROM NOW rather than a deadline, because a guest has no clock:
+  /// the caller has one, and turning a duration into a deadline is the caller's arithmetic.
+  record token {
+    access-token: string,
+    expires-in: u64,
+  }
+
   variant error {
     /// The key does not exist.
     not-found(string),
@@ -74,66 +110,74 @@ interface cloud-types {
 }
 
 interface cloud-provider {
-  use cloud-types.{object, listing, range, error};
+  use cloud-types.{object, listing, range, target, token, error};
 
-  /// A live connection to one bucket.
+  /// Check the target is usable, for the settings panel's "Test" button. Cheap and
+  /// side-effect free — typically a zero-length list.
+  test: func(at: target) -> result<_, error>;
+
+  /// One page of a listing under `prefix`.
   ///
-  /// Opening is separate from every operation because authentication is: a GCS token refresh
-  /// or an STS assume-role happens once and is reused, and an interface where each call
-  /// carried its config would redo it on every keystroke of a directory listing.
-  resource connection {
-    /// Open a bucket.
-    ///
-    /// `config` is the provider's own JSON — endpoint, region, whichever of them this
-    /// provider needs. It is opaque to the host, which has no business knowing what an S3
-    /// region is; the settings panel that produced it belongs to the same package.
-    ///
-    /// Credentials are NOT in here. The provider fetches them by key from
-    /// `arbor:host/secrets`, which is what keeps a token out of a config file.
-    open: static func(bucket: string, config: string) -> result<connection, error>;
+  /// `delimiter` set to `/` gives the folder-shaped view the explorer renders; unset walks
+  /// everything under the prefix, which is what a search does.
+  // `%list`: `list` is a WIT keyword (the built-in `list<T>`), and the escape is what the
+  // language provides for exactly this. Renaming it would cost the one word every object
+  // store calls this operation.
+  %list: func(
+    at: target,
+    prefix: string,
+    delimiter: option<string>,
+    cursor: option<string>,
+    limit: option<u32>,
+  ) -> result<listing, error>;
 
-    /// Check the connection is usable, for the settings panel's "Test" button. Cheap and
-    /// side-effect free — typically a zero-length list.
-    test: func() -> result<_, error>;
+  /// Metadata for one key, without fetching it.
+  stat: func(at: target, key: string) -> result<object, error>;
 
-    /// One page of a listing under `prefix`.
-    ///
-    /// `delimiter` set to `/` gives the folder-shaped view the explorer renders; unset walks
-    /// everything under the prefix, which is what a search does.
-    // `%list`: `list` is a WIT keyword (the built-in `list<T>`), and the escape is what the
-    // language provides for exactly this. Renaming it would cost the one word every object
-    // store calls this operation.
-    %list: func(
-      prefix: string,
-      delimiter: option<string>,
-      cursor: option<string>,
-      limit: option<u32>,
-    ) -> result<listing, error>;
+  /// Read an object, or part of one.
+  ///
+  /// Returns bytes rather than streaming them. A stream out of a guest is the hardest shape
+  /// the component model has, and ranged reads cover what streaming was wanted for: the
+  /// caller asks for the slice it can hold. A large download is successive ranged reads,
+  /// which `arbor.ext.call_to_file` appends to one file without the bytes passing through the
+  /// caller.
+  read: func(at: target, key: string, part: option<range>) -> result<list<u8>, error>;
 
-    /// Metadata for one key, without fetching it.
-    stat: func(key: string) -> result<object, error>;
+  /// Write an object whole. The caller's side of a chunked upload is
+  /// `arbor.ext.call_from_file`, which lowers a slice of a local file into `body`.
+  write: func(
+    at: target,
+    key: string,
+    body: list<u8>,
+    content-type: option<string>,
+  ) -> result<_, error>;
 
-    /// Read an object, or part of one.
-    ///
-    /// Returns bytes rather than streaming them. A stream out of a guest is the hardest shape
-    /// the component model has, and ranged reads cover what streaming was wanted for: the
-    /// caller asks for the slice it can hold. The host chunks a large download by calling
-    /// this repeatedly.
-    read: func(key: string, part: option<range>) -> result<list<u8>, error>;
+  /// Remove an object. Removing something absent succeeds — the caller asked for it to be
+  /// gone, and it is.
+  delete: func(at: target, key: string) -> result<_, error>;
 
-    /// Write an object whole.
-    write: func(key: string, body: list<u8>, content-type: option<string>) -> result<_, error>;
+  /// Turn a credential the provider understands into an access token.
+  ///
+  /// The route that needs cryptography: a service-account key is an RSA private key, and the
+  /// exchange is a JWT signed with it. It lives in the guest because that is where the
+  /// signing code can be — Lua has no RSA, and a host that grew one would be a host that had
+  /// learned what a service account is.
+  ///
+  /// `credential` is the provider's own format, opaque to everyone else (for GCS, the key
+  /// file's JSON). The answer is meant to be STORED by the caller, in the same credential slot
+  /// the provider reads its bearer token from — which is what keeps this to one exchange per
+  /// hour rather than one per request, since every call instantiates a fresh guest.
+  ///
+  /// `now-secs` is unix time, from the CALLER. A guest has no clock, and an assertion carries
+  /// the time it was issued at — so the alternative to passing it is granting every provider a
+  /// clock capability for the sake of one field.
+  mint-token: func(credential: string, scope: string, now-secs: u64) -> result<token, error>;
 
-    /// Remove an object. Removing something absent succeeds — the caller asked for it to be
-    /// gone, and it is.
-    delete: func(key: string) -> result<_, error>;
-
-    /// Server-side copy, so the bytes never travel through this machine.
-    ///
-    /// `source`/`destination` rather than `from`/`to`: `from` is a WIT keyword, and a pair of
-    /// parameters where one is escaped and the other is not reads worse than naming both.
-    copy: func(source: string, destination: string) -> result<_, error>;
-  }
+  /// Server-side copy, so the bytes never travel through this machine.
+  ///
+  /// `source`/`destination` rather than `from`/`to`: `from` is a WIT keyword, and a pair of
+  /// parameters where one is escaped and the other is not reads worse than naming both.
+  copy: func(at: target, source: string, destination: string) -> result<_, error>;
 }
 
 /// The world a cloud provider exports.

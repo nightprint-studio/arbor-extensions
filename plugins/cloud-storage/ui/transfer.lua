@@ -1,12 +1,24 @@
--- ui/transfer.lua — file picker + confirmation flows for up/download/sync.
+-- ui/transfer.lua — the file pickers and confirmations around a transfer.
 --
--- Pure orchestration: the heavy lifting (streaming, progress, jobs) lives
--- on the Rust side. From Lua we only:
---   1. Ask for a local path with arbor.ui.pick_file.
---   2. Confirm the target (overwrite? recursive?).
---   3. Fire arbor.cloud.upload / download / sync and let JobRegistry take over.
+-- What it does: ask for a local path, confirm the target, hand the work to `transfers`.
+-- What it no longer does: hand the work to Arbor. The loop that moves the bytes is Lua now
+-- (`transfers.lua`), the progress card is `arbor.ui.operation`, and the store is reached
+-- through whichever provider package implements it — none of which this file needs to know.
 
-local state = require("state")
+local state     = require("state")
+local transfers = require("transfers")
+local provider  = require("provider")
+
+--- Refuse early, and say which package is missing.
+--
+-- Every flow here starts with this. Discovering "no provider" three calls in surfaces as a
+-- store error, and the user goes looking at their credentials for a problem that is an
+-- uninstalled package.
+local function ready(conn, title)
+  if provider.available(conn) then return true end
+  arbor.notify{ title = title, message = provider.missing_message(conn), level = "error" }
+  return false
+end
 
 local M = {}
 
@@ -48,29 +60,24 @@ function M.download_target_picked(ctx)
     arbor.notify{ title = "Download", message = "Connection no longer exists.", level = "error" }
     return
   end
-  local job_id, err = arbor.cloud.download({
-    conn      = state.envelope(conn),
-    bucket    = ctx.bucket,
-    path      = ctx.remote_path,
-    -- `local` is a Lua reserved word so we have to bracket-quote it as a
-    -- table key. Rust-side the field is plain `local: String`.
-    ["local"] = local_path,
-  })
-  if err then
-    arbor.notify{ title = "Download failed to start", message = tostring(err), level = "error" }
-    return
-  end
-  -- Remember the target so the cloud-storage:job-done listener can show a
-  -- "Done — Open folder" notification with the actual local destination.
-  state.remember_job(job_id, {
+  if not ready(conn, "Download") then return end
+
+  local op_id, err = transfers.download(conn, ctx.bucket, ctx.remote_path, local_path)
+  -- Remember the target so the completion listener can offer "Open folder" with the actual
+  -- local destination.
+  state.remember_job(op_id, {
     kind       = "download",
     local_path = local_path,
     reveal     = true,
     label      = (ctx.remote_path or "?") .. " → " .. local_path,
   })
-  arbor.notify{ title = "Download started",
+  if err then
+    arbor.notify{ title = "Download failed", message = tostring(err), level = "error" }
+    return
+  end
+  arbor.notify{ title = "Download finished",
                 message = (ctx.remote_path or "?") .. " → " .. local_path,
-                level = "info",
+                level = "success",
                 persist = false }
 end
 
@@ -129,19 +136,31 @@ function M.upload_confirm(ctx)
   local sctx = ctx.state or {}
   local conn = state.find(sctx.config_id)
   if not conn then return end
-  local env = state.envelope(conn)
-  local job_id, err = arbor.cloud.upload({
-    conn      = env,
-    bucket    = sctx.bucket,
-    path      = ctx.target or "",
-    ["local"] = sctx.local_path or "",
-    overwrite = ctx.overwrite and true or false,
-  })
+  if not ready(conn, "Upload") then return end
+
+  local key = ctx.target or ""
+  -- Overwrite is checked here rather than passed down: a store has no "create if absent" for
+  -- an object write, so the only honest implementation is to look first — and looking is a
+  -- `stat`, which is one request and tells the user before anything is sent.
+  if not ctx.overwrite then
+    local existing = provider.stat(conn, sctx.bucket, key)
+    if existing then
+      arbor.notify{
+        title   = "Upload",
+        message = key .. " already exists. Tick \"Overwrite if exists\" to replace it.",
+        level   = "warning",
+      }
+      return
+    end
+  end
+
+  local size = tonumber(sctx.local_size) or 0
+  local _, err = transfers.upload(conn, sctx.bucket, key, sctx.local_path or "", { size = size })
   if err then
-    arbor.notify{ title = "Upload failed to start", message = tostring(err), level = "error" }
+    arbor.notify{ title = "Upload failed", message = tostring(err), level = "error" }
     return
   end
-  arbor.notify{ title = "Upload started", message = "Job " .. (job_id or "?"), level = "info" }
+  arbor.notify{ title = "Upload finished", message = key, level = "success" }
 end
 
 -- ── Sync (recursive) ───────────────────────────────────────────────────────
@@ -199,20 +218,47 @@ function M.sync_confirm(ctx)
   local sctx = ctx.state or {}
   local conn = state.find(sctx.config_id)
   if not conn then return end
-  local env = state.envelope(conn)
-  local job_id, err = arbor.cloud.sync({
-    conn          = env,
-    bucket        = sctx.bucket,
-    remote_prefix = ctx.remote_prefix or "",
-    ["local"]     = sctx.local_path or "",
-    direction     = sctx.direction or "down",
-    delete        = ctx.delete and true or false,
-  })
-  if err then
-    arbor.notify{ title = "Sync failed to start", message = tostring(err), level = "error" }
+  if not ready(conn, "Sync") then return end
+
+  local dir = sctx.local_path or ""
+  if (sctx.direction or "down") ~= "down" then
+    -- Sync UP walks the local tree, and which files are "in" it is a question about the
+    -- user's intent (hidden files, ignore rules) that this flow has never asked. Rather than
+    -- guess at it, say so: the download direction is the one that has a plan behind it.
+    arbor.notify{
+      title   = "Sync up",
+      message = "Only sync DOWN is available. Upload a folder with Upload instead.",
+      level   = "warning",
+    }
     return
   end
-  arbor.notify{ title = "Sync started", message = "Job " .. (job_id or "?"), level = "info" }
+
+  -- The destination, as the planner compares it: keys relative to the folder, with the size
+  -- and mtime the filesystem reports. Built here because "which local files count" is this
+  -- flow's decision, not the planner's.
+  local local_entries = {}
+  for _, path in ipairs(arbor.fs.glob(dir, "*") or {}) do
+    -- `glob` walks recursively and returns paths; `stat` is what carries the size and the
+    -- mtime the plan compares against. Two calls per file, both local.
+    local info = arbor.fs.stat(path)
+    if info and info.is_file then
+      local rel = path:sub(#dir + 2)
+      local_entries[#local_entries + 1] = {
+        key      = (rel:gsub("\\", "/")),
+        size     = info.size or 0,
+        modified = info.modified,
+      }
+    end
+  end
+
+  local _, err = transfers.sync_down(
+    conn, sctx.bucket, ctx.remote_prefix or "", dir, local_entries,
+    { overwrite = "if-newer", ["delete-extraneous"] = ctx.delete and true or false }
+  )
+  if err then
+    arbor.notify{ title = "Sync failed", message = tostring(err), level = "error" }
+    return
+  end
 end
 
 return M

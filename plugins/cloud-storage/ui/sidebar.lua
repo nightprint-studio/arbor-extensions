@@ -4,15 +4,20 @@
 --   ── [bucket / breadcrumb segments / current folder]   (clickable, jumps up)
 --   ── (Loading… | empty | rows)
 --
--- Each navigation does two `tree.set` calls so the user sees the "Loading…"
--- placeholder + skeleton breadcrumb before the network roundtrip finishes —
--- without that, the sidebar feels frozen because `arbor.cloud.list` blocks
--- the plugin VM for ~200–500ms per click.  The per-prefix listing cache
--- (`M._cache`) makes back-navigation instant; the toolbar's refresh button
--- clears it explicitly.
+-- Each navigation paints "Loading…" and a skeleton breadcrumb before the first request, so
+-- the sidebar does not read as frozen while a page is in flight — a listing blocks this VM
+-- for as long as the store takes. The per-prefix cache (`M._cache`) makes back-navigation
+-- instant; the toolbar's refresh button clears it explicitly.
+--
+-- The pages come from the provider package, one call each (`provider.list_all`). They used to
+-- arrive as host-driven stream events reassembled here, which needed a stream id, a staleness
+-- check and a repaint throttle — an accumulator reimplementing a loop, on the host's side of
+-- a boundary that had no reason to be there.
 
 local state    = require("state")
 local settings = require("settings")
+local provider = require("provider")
+local toolkit  = require("toolkit")
 
 local M = {}
 
@@ -21,11 +26,9 @@ local PLUGIN     = "cloud-storage"
 local NS         = PLUGIN .. ":" .. SIDEBAR_ID
 
 -- ── In-memory listing cache (per VM-lifetime) ──────────────────────────────
--- Shape: M._cache[<key>] = { items, truncated }   (final, fully-loaded page)
--- An in-flight stream keeps its partials in `M._inflight` until it `done`s,
--- then we commit them here so subsequent navigations are instant.
-M._cache    = {}
-M._inflight = nil   -- { stream_id, conn_id, bucket, prefix, title, crumb, items, truncated }
+-- Shape: M._cache[<key>] = { items, truncated } — committed once a folder has been walked to
+-- the end, so going back up is instant and going back down does not re-list.
+M._cache = {}
 
 local function cache_key(conn_id, bucket, prefix)
   return (conn_id or "") .. "|" .. (bucket or "") .. "|" .. (prefix or "")
@@ -47,17 +50,23 @@ function M.clear_cache(conn_id)
   end
 end
 
--- Monotonic stream id source — embedded in the chunk events so stale streams
--- (when the user navigates mid-load) can be ignored.
-M._stream_counter = 0
-local function new_stream_id()
-  M._stream_counter = M._stream_counter + 1
-  return "cs-" .. tostring(M._stream_counter) .. "-" .. tostring(math.floor(os.time()))
-end
+-- ── Walking a listing ──────────────────────────────────────────────────────
+--
+-- The store answers a page at a time and this walks the pages, repainting as it goes. It used
+-- to be a stream the HOST drove — the pages arrived as plugin hook events and an accumulator
+-- here reassembled them — which needed a stream id, a staleness check and a mid-stream
+-- throttle, all to reimplement a loop. The loop is the loop now.
+--
+-- What is lost: the VM is busy while a page is in flight, so another hook waits. That was
+-- already true of every other cloud call, and a page is one request.
 
--- Current search state (nil when in regular browse mode). When active the
--- sidebar renders a flat result list instead of the folder browser.
---   { stream_id, conn_id, bucket, root_prefix, pattern, scope, items, done }
+--- Cancels the walk in progress, if any. Navigating away mid-listing sets this; the page
+--- boundary notices and stops rather than painting a folder the user has left.
+M._walking = nil
+
+--- Current search state (nil when in regular browse mode). When active the sidebar renders a
+--- flat result list instead of the folder browser.
+---   { conn_id, bucket, root_prefix, pattern, scope, items, done, truncated, scanned }
 M._search = nil
 
 -- ── Public: register the section ───────────────────────────────────────────
@@ -296,85 +305,6 @@ local function rows_from_items(items, conn_id, bucket)
   return sort_rows(rows)
 end
 
--- ── Streaming chunk handler ────────────────────────────────────────────────
--- Fired by main.lua on `cloud-storage:list-chunk` hooks. Two cost-sensitive
--- rules drive the shape here:
---   1. fire_hook_on locks `plugin_host` while the Lua handler runs. Any work
---      we do here serialises against every other plugin-host operation on
---      the host (open_repo, fire_plugin_action, …) and freezes the UI when
---      it's slow. So mid-stream we render ONLY a tiny counter row — no
---      sort, no per-item tree-node rebuild, no large JSON payload.
---   2. The full sort + render only runs on `done`. Cost: O(N log N) once
---      instead of O(N² / 2) per chunk.
--- Stale streams are silently dropped by stream_id mismatch.
-
-local MID_STREAM_PAINT_MS = 250  -- throttle the counter updates
-
-function M.on_chunk(ev)
-  local inflight = M._inflight
-  if not inflight or not ev or ev.stream_id ~= inflight.stream_id then
-    return
-  end
-
-  -- Accumulate the new batch — append-only, no sort.
-  for _, it in ipairs(ev.items or {}) do
-    inflight.items[#inflight.items + 1] = it
-  end
-
-  if ev.error and ev.error ~= "" then
-    arbor.ui.tree.set(SIDEBAR_ID, {
-      title      = inflight.title,
-      breadcrumb = inflight.crumb,
-      nodes      = { err_node("List failed: " .. tostring(ev.error)) },
-    })
-    M._inflight = nil
-    return
-  end
-
-  if ev.done then
-    -- Final render: sort once, build all rows, push the full tree.
-    local rows = rows_from_items(inflight.items, inflight.conn_id, inflight.bucket)
-    if ev.truncated then
-      rows[#rows + 1] = info_node(
-        "Listing truncated at " .. tostring(#inflight.items)
-        .. " entries — refine the prefix to see more.", "Hash")
-    end
-    arbor.ui.tree.set(SIDEBAR_ID, {
-      title                       = inflight.title,
-      breadcrumb                  = inflight.crumb,
-      breadcrumb_edit_action      = "cloud:nav_to_typed_path",
-      breadcrumb_edit_placeholder = "Type a path, e.g. data/2024/chunks/",
-      nodes                       = #rows == 0 and { info_node("Empty folder.", "FolderSearch") } or rows,
-    })
-    cache_put(inflight.conn_id, inflight.bucket, inflight.prefix, {
-      items     = inflight.items,
-      truncated = ev.truncated and true or false,
-    })
-    M._inflight = nil
-    return
-  end
-
-  -- Mid-stream: throttled lightweight counter. We use os.clock which counts
-  -- CPU time on the main VM thread — fine here for "elapsed since last paint".
-  local now_ms = math.floor((os.clock() * 1000))
-  if now_ms - (inflight.last_paint_ms or 0) < MID_STREAM_PAINT_MS then
-    return
-  end
-  inflight.last_paint_ms = now_ms
-
-  arbor.ui.tree.set(SIDEBAR_ID, {
-    title                       = inflight.title,
-    breadcrumb                  = inflight.crumb,
-    breadcrumb_edit_action      = "cloud:nav_to_typed_path",
-    breadcrumb_edit_placeholder = "Type a path, e.g. data/2024/chunks/",
-    nodes                       = { {
-      id = "stream-loading",
-      label = "Loading… (" .. tostring(#inflight.items) .. " items)",
-      icon = "Spinner", kind = "section", badge_kind = "muted",
-    } },
-  })
-end
-
 -- ── Refresh entry-point ────────────────────────────────────────────────────
 -- `opts.use_cache` (default true) — when false, bypass the cache and re-stream.
 
@@ -440,25 +370,25 @@ function M.refresh(opts)
     return
   end
 
-  -- ── Cancel any in-flight stream from a previous navigation ──────────────
-  if M._inflight and M._inflight.stream_id then
-    pcall(function() arbor.cloud.cancel(M._inflight.stream_id) end)
+  -- A walk still going belongs to the folder we just left.
+  M._walking = { cancelled = false }
+  local walk = M._walking
+
+  -- A good moment to make sure the credentials are current: the user has just navigated, and
+  -- a renewal that happens now is one that does not fail halfway through a transfer later.
+  provider.ensure(conn)
+
+  if not provider.available(conn) then
+    arbor.ui.tree.set(SIDEBAR_ID, {
+      title      = title,
+      breadcrumb = crumb,
+      nodes      = { err_node(provider.missing_message(conn)) },
+    })
+    return
   end
 
-  -- ── Start a new streaming listing ───────────────────────────────────────
-  local stream_id = new_stream_id()
-  M._inflight = {
-    stream_id = stream_id,
-    conn_id   = conn.id,
-    bucket    = bucket,
-    prefix    = prefix,
-    title     = title,
-    crumb     = crumb,
-    items     = {},
-  }
-
-  -- Paint the breadcrumb + initial "Loading…" before kicking off the stream
-  -- so the navigation feels instant even when the first chunk hasn't landed.
+  -- Paint the breadcrumb + "Loading…" before the first request, so navigating feels
+  -- immediate even when the folder takes a moment.
   arbor.ui.tree.set(SIDEBAR_ID, {
     title                       = title,
     breadcrumb                  = crumb,
@@ -468,21 +398,54 @@ function M.refresh(opts)
                                       kind = "section", badge_kind = "muted" } },
   })
 
-  local _, err = arbor.cloud.list_stream({
-    conn      = state.envelope(conn),
-    bucket    = bucket,
-    prefix    = prefix,
-    stream_id = stream_id,
-    cap       = settings.list_hard_cap(),
+  local seen = 0
+  local listing, err = provider.list_all(conn, bucket, prefix, {
+    delimiter = "/",
+    hard_cap  = settings.list_hard_cap(),
+    cancelled = function() return walk.cancelled end,
+    -- Between pages: a count, not the rows. Building a thousand tree nodes per page to throw
+    -- them away on the next one is what made the old mid-stream repaint need a throttle.
+    on_page = function(entries)
+      seen = seen + #entries
+      arbor.ui.tree.set(SIDEBAR_ID, {
+        title                       = title,
+        breadcrumb                  = crumb,
+        breadcrumb_edit_action      = "cloud:nav_to_typed_path",
+        breadcrumb_edit_placeholder = "Type a path, e.g. data/2024/chunks/",
+        nodes = { { id = "stream-loading",
+                    label = "Loading… (" .. tostring(seen) .. " items)",
+                    icon = "Spinner", kind = "section", badge_kind = "muted" } },
+      })
+    end,
   })
+
+  if walk.cancelled then return end
+  M._walking = nil
+
   if err then
-    M._inflight = nil
     arbor.ui.tree.set(SIDEBAR_ID, {
       title      = title,
       breadcrumb = crumb,
       nodes      = { err_node("List failed: " .. tostring(err)) },
     })
+    return
   end
+
+  local items = listing.entries or {}
+  local rows  = rows_from_items(items, conn.id, bucket)
+  if listing.truncated then
+    rows[#rows + 1] = info_node(
+      "Listing truncated at " .. tostring(#items)
+      .. " entries — refine the prefix to see more.", "Hash")
+  end
+  arbor.ui.tree.set(SIDEBAR_ID, {
+    title                       = title,
+    breadcrumb                  = crumb,
+    breadcrumb_edit_action      = "cloud:nav_to_typed_path",
+    breadcrumb_edit_placeholder = "Type a path, e.g. data/2024/chunks/",
+    nodes                       = #rows == 0 and { info_node("Empty folder.", "FolderSearch") } or rows,
+  })
+  cache_put(conn.id, bucket, prefix, { items = items, truncated = listing.truncated and true or false })
 end
 
 -- ── Search mode ────────────────────────────────────────────────────────────
@@ -605,18 +568,11 @@ function M.start_search(pattern, scope)
     root_prefix = state.active_prefix(conn.id) or ""
   end
 
-  -- Cancel any previous in-flight ops.
-  if M._inflight and M._inflight.stream_id then
-    pcall(function() arbor.cloud.cancel(M._inflight.stream_id) end)
-    M._inflight = nil
-  end
-  if M._search and M._search.stream_id and not M._search.done then
-    pcall(function() arbor.cloud.cancel(M._search.stream_id) end)
-  end
+  -- Whatever was walking belongs to the view we are leaving.
+  M._walking = { cancelled = false }
+  local walk = M._walking
 
-  local sid = new_stream_id()
   M._search = {
-    stream_id    = sid,
     conn_id      = conn.id,
     bucket       = bucket,
     root_prefix  = root_prefix,
@@ -627,54 +583,40 @@ function M.start_search(pattern, scope)
     truncated    = false,
     scanned      = 0,
   }
+  local search = M._search
   paint_search()
 
-  local _, err = arbor.cloud.search_stream({
-    conn        = state.envelope(conn),
-    bucket      = bucket,
-    root_prefix = root_prefix,
-    pattern     = pattern,
-    stream_id   = sid,
+  -- No delimiter: a search walks everything under the prefix rather than stopping at each
+  -- folder. The matching is `cloud-toolkit`'s, which is also what the providers link — so a
+  -- pattern means the same thing here as it does anywhere else in the panel.
+  local _, err = provider.list_all(conn, bucket, root_prefix, {
+    hard_cap  = settings.list_hard_cap(),
+    cancelled = function() return walk.cancelled end,
+    on_page   = function(entries)
+      for _, e in ipairs(entries) do
+        search.scanned = search.scanned + 1
+        if not e.prefix and toolkit.glob_match(pattern, toolkit.name_of(e.key)) then
+          search.items[#search.items + 1] = e
+        end
+      end
+      paint_search()
+    end,
   })
+
+  if walk.cancelled then return end
+  M._walking = nil
+  search.done = true
   if err then
-    M._search.done  = true
-    M._search.error = tostring(err)
+    search.error = tostring(err)
     arbor.notify{ title = "Search failed", message = tostring(err), level = "error" }
-    paint_search()
   end
+  paint_search()
 end
 
 function M.clear_search()
-  if M._search and M._search.stream_id and not M._search.done then
-    pcall(function() arbor.cloud.cancel(M._search.stream_id) end)
-  end
+  if M._walking then M._walking.cancelled = true end
   M._search = nil
   M.refresh()
-end
-
--- on_chunk dispatch: distinguish "list" stream events (current sidebar
--- browse) from "search" stream events. We multiplex on the `kind` field.
-local orig_on_chunk = M.on_chunk
-function M.on_chunk(ev)
-  if ev and ev.kind == "search" then
-    local s = M._search
-    if not s or ev.stream_id ~= s.stream_id then return end
-    for _, it in ipairs(ev.items or {}) do
-      s.items[#s.items + 1] = it
-    end
-    if ev.scanned then s.scanned = ev.scanned end
-    if ev.done then
-      s.done         = true
-      s.truncated    = ev.truncated and true or false
-      s.regex        = ev.regex
-      s.combined     = ev.combined
-      s.sample_paths = ev.sample_paths or {}
-      if ev.error and ev.error ~= "" then s.error = ev.error end
-    end
-    paint_search()
-    return
-  end
-  orig_on_chunk(ev)
 end
 
 return M

@@ -3,8 +3,10 @@
 -- All persistent state lives in plugin settings (arbor.settings.global) so
 -- it survives plugin reloads but never leaks into git. Secrets that can't
 -- be persisted in cleartext (SA JSON inline, OAuth refresh tokens) live in
--- the OS keyring via `arbor.cloud.secret_*` — those calls are made from
--- the config form, not here.
+-- the OS keyring via `arbor.credentials.*` — this package's own slots, which is the only
+-- namespace it can name. Those calls are made from the config form, not here.
+
+local secrets = require("secrets")
 
 local M = {}
 
@@ -123,16 +125,19 @@ function M.drop_secrets_for(conn)
   if conn.s3     and conn.s3.secret_ref     and conn.s3.secret_ref     ~= "" then refs[#refs+1] = conn.s3.secret_ref end
   if conn.azblob and conn.azblob.secret_ref and conn.azblob.secret_ref ~= "" then refs[#refs+1] = conn.azblob.secret_ref end
   for _, r in ipairs(refs) do
-    pcall(function() arbor.cloud.secret_delete(r) end)
+    -- Best-effort. A token this package does not own (the provider's OAuth refresh token)
+    -- is not ours to remove either: deleting a connection should not sign the user out of an
+    -- account another connection still uses.
+    secrets.delete(r)
     removed[#removed + 1] = r
   end
   return removed
 end
 
--- ── Connection envelope (for arbor.cloud.* calls) ──────────────────────────
--- Builds the `CloudConnection` shape the Rust side expects from a stored
--- record. Drops UI-only fields (`name`, `default_bucket`, etc.) and leaves
--- a serialisable, host-ready table.
+-- ── Connection envelope ────────────────────────────────────────────────────
+-- The provider-facing shape of a stored record, without the UI-only fields (`name`,
+-- `default_bucket`, …). `provider.target` narrows it further to what actually crosses into
+-- the extension; this stays as the one place a connection is described.
 
 function M.envelope(conn)
   if not conn then return nil end

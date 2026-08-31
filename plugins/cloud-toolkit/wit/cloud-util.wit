@@ -1,0 +1,143 @@
+package arbor:cloud-toolkit@1.0.0;
+
+// The parts of object storage that are the same everywhere, as an extension.
+//
+// ## Why this is a package and not host API
+//
+// None of this is Arbor's to know. Splitting a key, matching a glob, deciding what a sync
+// would do — these are decisions about buckets, and a host that carried them would be a host
+// that had learned what a bucket is. **If the host has to learn something, it is not a
+// plugin.**
+//
+// It is not a *provider* either: nothing here talks to a store. It is the library the panel
+// and the providers share, published the only way one package can offer code to another —
+// as an extension somebody calls.
+//
+// ## Who calls it
+//
+// The orchestrating plugin, in Lua, through `arbor.ext.call`. A provider in this repo does not
+// call it: a guest cannot call another guest, and it does not need to — it links `cloud-common`
+// directly, which is the same code compiled in rather than called across. One implementation,
+// two ways in.
+//
+// ## Everything here is pure
+//
+// No network, no filesystem, no clock. Which is why the package declares no permissions at
+// all: a component that only computes has nothing to be tricked into.
+interface util {
+  /// A half-open byte range: `start` included, `end` excluded — the same convention the
+  /// provider interface uses, so a range crosses between them unconverted.
+  record byte-range {
+    start: u64,
+    end: u64,
+  }
+
+  /// An object in the bucket, as much of it as planning needs.
+  record remote-entry {
+    key: string,
+    size: u64,
+    /// Unix seconds, when the store reports one.
+    modified: option<u64>,
+    etag: option<string>,
+  }
+
+  /// A file on the caller's machine, keyed RELATIVE to the sync root — which is what makes
+  /// the two sides comparable. Turning a key back into a path is the caller's job, and the
+  /// one part of a sync that is genuinely about a machine.
+  record local-entry {
+    key: string,
+    size: u64,
+    modified: option<u64>,
+    /// The etag recorded the last time this file was transferred, if the caller kept one.
+    etag: option<string>,
+  }
+
+  /// When an entry present on both sides should be transferred anyway.
+  enum overwrite {
+    /// Every time. Correct and expensive.
+    always,
+    /// When the source is newer (with two seconds of slack — see `sync-plan`).
+    if-newer,
+    /// When the sizes differ. Cheap, and blind to an edit that kept the length.
+    if-different-size,
+    /// When the recorded etag differs from the store's.
+    if-different-etag,
+    /// Never: new files only.
+    never,
+  }
+
+  record sync-policy {
+    overwrite: overwrite,
+    /// Remove destination entries the source no longer has. The setting that loses data when
+    /// a source listing came back partial, so it is never the default.
+    delete-extraneous: bool,
+  }
+
+  /// What to do with one entry. `reason` is meant to be shown: a sync that says why it
+  /// skipped something is a sync somebody can trust.
+  variant sync-action {
+    create(tuple<string, u64>),
+    update(tuple<string, u64, string>),
+    skip(tuple<string, string>),
+    delete(string),
+  }
+
+  record sync-plan-result {
+    actions: list<sync-action>,
+    /// Bytes the transfers would move — what a progress bar needs before it starts.
+    bytes: u64,
+  }
+
+  /// Which order to concatenate split parts in.
+  enum chunk-order {
+    /// Digits compare as numbers, so `part2` precedes `part10`. Lexicographic order — what
+    /// every store lists in — concatenates a split archive wrong.
+    natural,
+    /// Oldest first, by the store's `modified`.
+    date,
+  }
+
+  record chunk {
+    key: string,
+    modified: option<u64>,
+  }
+
+  /// Split `size` bytes into consecutive ranges of at most `chunk`. An empty object plans
+  /// nothing; a `chunk` of zero means one whole range.
+  plan-ranges: func(size: u64, chunk: u64) -> list<byte-range>;
+
+  /// Whether `key` matches `pattern`. `?` is one character and `*` any run, neither crossing
+  /// `/`; `**` crosses.
+  glob-match: func(pattern: string, key: string) -> bool;
+
+  /// Order split parts for concatenation.
+  order-chunks: func(chunks: list<chunk>, order: chunk-order) -> list<chunk>;
+
+  /// What a download would do, decided before anything moves — so it can be shown to the
+  /// person first. Compares on size, time and etag; never reads a file's contents.
+  sync-plan: func(
+    remote: list<remote-entry>,
+    local: list<local-entry>,
+    policy: sync-policy,
+  ) -> sync-plan-result;
+
+  /// Split a key into its prefix (trailing `/` kept, because that is what a store's `prefix=`
+  /// wants) and its final component.
+  split-key: func(key: string) -> tuple<string, string>;
+
+  /// Join a prefix and a name without doubling or dropping the separator.
+  join-key: func(prefix: string, name: string) -> string;
+
+  /// The prefix one level up, for a breadcrumb's parent link.
+  parent-prefix: func(prefix: string) -> string;
+
+  /// Percent-encode one URL path segment, slashes included — a key is one segment.
+  encode-segment: func(s: string) -> string;
+
+  /// RFC 3339 (UTC) → unix seconds; `none` for anything that is not that shape.
+  rfc3339-secs: func(s: string) -> option<u64>;
+}
+
+world toolkit {
+  export util;
+}

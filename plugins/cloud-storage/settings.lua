@@ -46,6 +46,30 @@ function M.set_list_hard_cap(v)
   arbor.settings.global.set("list_hard_cap", tostring(math.floor(v)))
 end
 
+-- Bytes per range in a transfer.
+--
+-- A download is a sequence of ranged reads appended to one file, and this is how big each
+-- one is. It matters in two directions: a smaller chunk means a Cancel is felt sooner and
+-- less memory is held at once, a larger one means fewer round trips on a fast link. 8 MiB is
+-- the middle that neither a home connection nor a datacentre link regrets.
+local CHUNK_MIN     = 256 * 1024
+local CHUNK_MAX     = 64 * 1024 * 1024
+local CHUNK_DEFAULT = 8 * 1024 * 1024
+
+function M.get_chunk_bytes()
+  local v = tonumber(arbor.settings.global.get("chunk_bytes") or "")
+  if not v or v < CHUNK_MIN then v = CHUNK_DEFAULT end
+  if v > CHUNK_MAX then v = CHUNK_MAX end
+  return math.floor(v)
+end
+
+function M.set_chunk_bytes(v)
+  v = tonumber(v) or CHUNK_DEFAULT
+  if v < CHUNK_MIN then v = CHUNK_MIN end
+  if v > CHUNK_MAX then v = CHUNK_MAX end
+  arbor.settings.global.set("chunk_bytes", tostring(math.floor(v)))
+end
+
 -- ── Settings panel ─────────────────────────────────────────────────────────
 
 function M.register()
@@ -79,6 +103,14 @@ function M.contribute_sections()
           label = "Parallel downloads",
           min = 1, max = 16, step = 1,
           default = M.parallel_downloads() },
+        { type = "label",
+          text = "How much of an object is fetched per request. Smaller means Cancel is felt "
+              .. "sooner and less is held in memory; larger means fewer round trips on a fast "
+              .. "link." },
+        { type = "number", name = "chunk_mib",
+          label = "Chunk size (MiB)",
+          min = 1, max = 64, step = 1,
+          default = math.floor(M.get_chunk_bytes() / (1024 * 1024)) },
       },
     },
   })

@@ -1,0 +1,18 @@
+[package]
+name        = "cloud-toolkit"
+version     = "1.0.0"
+edition.workspace = true
+license.workspace = true
+description = "The shared object-storage logic, exported as a wasm extension so a Lua plugin can call what the providers link."
+
+[lib]
+# A component is built as a cdylib and then adapted; the module name is what `[[provides]]`
+# names, with dashes as underscores the way cargo writes them.
+name       = "cloud_toolkit"
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen  = { workspace = true }
+# The logic itself. Linked, not called: this component is a translation layer over it, and
+# every provider in this repo links the same crate directly.
+cloud-common = { path = "../../../crates/cloud-common" }

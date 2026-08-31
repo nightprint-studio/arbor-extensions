@@ -7,25 +7,62 @@
   it; the Marketplace offers to install both.
 </p>
 
+<h2>Before you connect: your own OAuth client</h2>
+<p>
+  Google issues an OAuth client per application, and a client id shipped inside a package would
+  be shared by everyone who installed it — one quota, one consent screen, one thing to revoke.
+  So this package asks for yours.
+</p>
+<ol>
+  <li>Create a <strong>Desktop</strong> OAuth client at
+    <code>console.cloud.google.com/apis/credentials</code>.</li>
+  <li>Register <code>http://127.0.0.1:7732/</code> as its redirect URI.</li>
+  <li>Paste the client id (and secret, if it issued one) into this package's settings — the
+    gear beside it in the Plugin Manager.</li>
+</ol>
+
 <h2>Connecting</h2>
 <p>
-  Open <strong>Cloud → Connections → Add</strong>, pick Google Cloud Storage, and sign in. The
-  access token is stored in your operating system's keychain, never in a settings file and
-  never inside this package's folder.
+  Open <strong>Cloud → Connections → Add</strong>, pick Google Cloud Storage, and sign in. A
+  browser window opens; approve, and come back. The refresh token is stored in your operating
+  system's keychain, never in a settings file and never inside this package's folder.
 </p>
 
-<h2>Where the token comes from</h2>
+<h2>Already signed in with the Google SDK?</h2>
 <p>
-  The cloud panel runs the sign-in and stores the result with
-  <code>arbor.credentials.set("oauth", token)</code> — into <em>this package's</em> slot, which
-  is the only one this backend can read. Nothing outside a package writes into its namespace,
-  including Arbor itself, so a connection made before this backend was installed needs one
-  reconnect before it can serve it.
+  If you have run <code>gcloud auth application-default login</code>, this package finds those
+  credentials and uses them — pick <strong>Application Default Credentials</strong> as the
+  method and there is nothing else to set up. It reads that one file and never writes to it.
 </p>
 <p>
-  Until then the panel keeps working: Arbor falls back to its own built-in implementation
-  rather than failing, so installing this package can never break a connection that was
-  already working.
+  ADC comes in two shapes and both work: a <em>user</em> grant, which is refreshed like any
+  sign-in, and a <em>service-account key</em>, which is adopted and used as below.
+</p>
+
+<h2>Service-account keys</h2>
+<p>
+  Paste the key file's contents into the connection form. It is stored in this package's own
+  keychain slot — the panel that took it from you does not keep a copy, because it is not the
+  thing that can use it.
+</p>
+<p>
+  Using it is one exchange: the key signs a short-lived assertion, and the assertion buys an
+  access token that lasts an hour. The signing happens <em>inside the sandboxed component</em>,
+  which is the only place in Arbor with the cryptography for it — the key is handed to the
+  component and to nothing else, and never leaves this machine.
+</p>
+
+<h2>Who runs the sign-in</h2>
+<p>
+  This package does — not the cloud panel. It owns the credential slot, and a package can only
+  reach the slots its own manifest declares, so the token can only be written by the thing that
+  reads it. It is also what keeps the panel free of Google: the panel asks this package to
+  connect, by name, and never learns which endpoints or scopes were involved.
+</p>
+<p>
+  What Arbor lends is the part no package can hold: the loopback listener the browser comes back
+  to, and the keychain. The endpoints, the scope and Google's own consent parameters are
+  arguments this package passes.
 </p>
 
 <h2>What it can reach</h2>
@@ -35,9 +72,12 @@
 <ul>
   <li><strong>Network:</strong> <code>googleapis.com</code> and its subdomains. Nothing else —
     a request to any other host is refused by Arbor before it is sent.</li>
-  <li><strong>One credential slot,</strong> the Google access token. It can read and write that
-    slot and no other, and it cannot name the credentials Arbor keeps for itself (your git
-    provider tokens, your issue-tracker keys) at all.</li>
+  <li><strong>Two credential slots</strong> — the access token, and the service-account key if
+    you use one. It can read and write those two and no others, and it cannot name the
+    credentials Arbor keeps for itself (your git provider tokens, your issue-tracker keys) at
+    all.</li>
+  <li><strong>Read access to one file,</strong> the application-default credentials the Google
+    SDK writes. Nothing is ever written there.</li>
 </ul>
 <p>
   The backend is a sandboxed WebAssembly component: it has no filesystem, opens no sockets, and
@@ -50,8 +90,8 @@
   <thead><tr><th>Operation</th><th>Notes</th></tr></thead>
   <tbody>
     <tr><td>Browse</td><td>Folders are synthesised from key prefixes — object storage has no directories. A folder row has no size or date because there is none to report.</td></tr>
-    <tr><td>Download</td><td>Read in ranges, so progress and Cancel work exactly as they do without this package — the transfer is Arbor's, only the bytes come from here.</td></tr>
-    <tr><td>Upload</td><td>Whole-object, so files up to 64&nbsp;MB come through this backend and anything larger is streamed by Arbor's built-in path instead. The upload works either way; only which side moves the bytes changes.</td></tr>
+    <tr><td>Download</td><td>Read in ranges, so progress and Cancel stay with the panel — the transfer is the panel's, only the bytes come from here. A large file is a sequence of ranges appended to one file, and the bytes never pass through the panel itself.</td></tr>
+    <tr><td>Upload</td><td>Whole-object per call, so a large upload is sent in slices of the local file. Each slice is one call; the panel decides how big they are.</td></tr>
     <tr><td>Delete</td><td>Removing a key that is not there succeeds.</td></tr>
     <tr><td>Copy</td><td>Server-side — the bytes never travel through your machine.</td></tr>
   </tbody>

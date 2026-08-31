@@ -8,8 +8,12 @@ keywords    = ["cloud", "gcs", "google", "storage"]
 arbor_api   = 1
 doc_file    = "doc.html"
 
-# No [lua] section: this package is a provider and nothing else. Its UI — the connections
-# panel, the settings form — lives in the package it depends on.
+# The Lua half: signing in, and keeping the token fresh. It is here rather than in the panel
+# because a package can only reach the credential slots its OWN manifest declares — so the
+# token can only be written by the package that reads it — and because a panel that carried
+# Google's endpoints would need editing for every store added after it.
+[lua]
+entry = "main.lua"
 
 [[dependencies]]
 name    = "cloud-storage"
@@ -19,13 +23,39 @@ version = ">=1.0.0"
 # Only what this provider actually reaches. Entries are bare domains and cover their
 # subdomains, so `googleapis.com` includes `storage.googleapis.com` — a `*.` prefix would be
 # read as a literal label and match nothing.
+#
+# The OAuth endpoints are NOT in this list, and that is not an omission: the sign-in is
+# performed by Arbor's own engine (`arbor.oauth`), which holds the loopback listener and the
+# keychain. This package names the endpoints; it never reaches them.
 network = ["googleapis.com"]
+
+# The panel asks this package to connect, by name (`cloud-gcs.connect`), so it can offer
+# sign-in for a store whose provider it knows nothing about.
+service_export = true
+
+# To call its OWN wasm component: minting a token from a service-account key means signing a
+# JWT, and the signing lives in the component because Lua has no RSA. `arbor.ext.call` is
+# gated on this whoever the callee is, including yourself.
+service_call = true
+
+# Read-only, and for one file: the credentials `gcloud auth application-default login` writes
+# under the OS config directory. It is how a user who already signed in with the Google SDK is
+# recognised without signing in again. Nothing is ever written there.
+fs       = "read"
+fs_scope = ["*"]
 
 # The OAuth access token, in the OS keychain. This package can read and write this slot and no
 # other, and cannot name Arbor's own credentials at all.
 [[credentials]]
 key   = "oauth"
 label = "Google Cloud access token"
+
+# The service-account key, when a connection authenticates that way. A second slot rather than
+# one: the key is what the user gave us and lasts until they revoke it, the token above is
+# derived from it and lasts an hour — and renewing one must not touch the other.
+[[credentials]]
+key   = "service-account"
+label = "Google service-account key"
 
 [[provides]]
 interface = "cloud-provider"

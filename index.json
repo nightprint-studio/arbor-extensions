@@ -26,6 +26,9 @@
       "subpath": "plugins/release-notes"
     },
     {
+      "subpath": "plugins/cloud-toolkit"
+    },
+    {
       "subpath": "plugins/cloud-storage"
     },
     {

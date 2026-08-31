@@ -3,7 +3,7 @@
 -- Thin event wiring:
 --   · arbor:plugin_load → register sidebar + listen for progress / oauth events.
 --   · Sidebar/toolbar/tree events → orchestrate via sidebar.lua / config_form.lua /
---     transfer.lua / arbor.cloud.* calls.
+--     transfer.lua, which reach the store through the provider package (`provider.lua`).
 
 local state            = require("state")
 local sidebar          = require("ui.sidebar")
@@ -12,6 +12,8 @@ local connections_modal = require("ui.connections_modal")
 local transfer         = require("ui.transfer")
 local settings         = require("settings")
 local chunks           = require("chunks")
+local provider         = require("provider")
+local secrets          = require("secrets")
 
 -- ── Lifecycle ───────────────────────────────────────────────────────────────
 
@@ -145,13 +147,11 @@ arbor.events.on("cloud:settings-save", function(ctx)
   if ctx.list_hard_cap ~= nil then
     settings.set_list_hard_cap(ctx.list_hard_cap)
   end
-end)
-
--- Streaming list chunks land here. The host calls `fire_hook_on` on this
--- exact name from `cloud::ops::list_stream`; the sidebar accumulator
--- ignores stale streams via stream_id mismatch.
-arbor.events.on("cloud-storage:list-chunk", function(ev)
-  sidebar.on_chunk(ev)
+  -- The panel asks in MiB because that is the unit a person thinks in; the transfer loop
+  -- wants bytes. Converting here keeps the stored value in one unit.
+  if ctx.chunk_mib ~= nil then
+    settings.set_chunk_bytes((tonumber(ctx.chunk_mib) or 8) * 1024 * 1024)
+  end
 end)
 
 -- ── Toolbar actions ────────────────────────────────────────────────────────
@@ -216,15 +216,9 @@ arbor.events.on("cloud:nav_to_typed_path", function(ctx)
   local bucket = state.active_bucket(conn.id)
   if (bucket or "") == "" then bucket = conn.default_bucket or "" end
 
-  -- Synchronous probe with a tiny limit just to detect "no objects at all".
-  -- We deliberately use the non-streaming `arbor.cloud.list` so we know the
-  -- answer before navigating — keeps the notify in sync with the listing.
-  local page, err = arbor.cloud.list({
-    conn   = state.envelope(conn),
-    bucket = bucket,
-    prefix = path,
-    limit  = 1,
-  })
+  -- One page with a tiny limit, just to tell "empty prefix" from "no such prefix" before
+  -- navigating — so the message and the listing agree.
+  local page, err = provider.list(conn, bucket, path, { delimiter = "/", limit = 1 })
   if err then
     arbor.notify{ title = "Go to path", level = "error",
       message = "Listing failed: " .. tostring(err) }
@@ -325,14 +319,8 @@ arbor.events.on("cloud:multi_dl_chunks_auto",  function(ctx) chunks.multi_dl_chu
 arbor.events.on("cloud:multi_dl_chunks_custom",function(ctx) chunks.multi_dl_chunks(ctx, "custom") end)
 arbor.events.on("cloud:multi_delete",          function(ctx) chunks.multi_delete(ctx)          end)
 
--- Chunk-merge orchestrator: when the host has finished downloading the
--- N chunks, this hook fires with the local_paths. We forward them to the
--- selected chunk-handler service and emit the modal terminal update.
-arbor.events.on("cloud-storage:download-many-done", function(ev)
-  chunks.on_download_many_done(ev)
-end)
-
--- Drag-reorder picker reply (custom-order chunks flow).
+-- The order form's reply (custom-order chunks flow). The download and the merge run inside
+-- the handler below, so there is no second event to wait for.
 arbor.events.on("cloud:chunk-order-picked", function(ctx)
   chunks.on_chunk_order_picked(ctx)
 end)
@@ -346,11 +334,7 @@ arbor.events.on("cloud:stat_modal", function(ctx)
   local d = ctx.data or {}
   local conn = state.find(d.config_id)
   if not conn or not d.bucket or not d.path then return end
-  local obj, err = arbor.cloud.stat({
-    conn   = state.envelope(conn),
-    bucket = d.bucket,
-    path   = d.path,
-  })
+  local obj, err = provider.stat(conn, d.bucket, d.path)
   if err then
     arbor.notify{ title = "Properties failed", message = tostring(err), level = "error" }
     return
@@ -419,12 +403,23 @@ arbor.events.on("cloud:delete_object", function(ctx)
     confirm_kind  = "danger",
     cancel_label  = "Cancel",
     on_confirm    = function()
-      local _, err = arbor.cloud.delete({
-        conn      = state.envelope(conn),
-        bucket    = d.bucket,
-        path      = d.path,
-        recursive = d.is_dir and true or false,
-      })
+      -- A store has no recursive delete: a "folder" is a shared prefix, so removing one is
+      -- removing every key under it. Walked here rather than asked for, because the walk is
+      -- what the confirmation counted.
+      local err
+      if d.is_dir then
+        local listing, lerr = provider.list_all(conn, d.bucket, d.path, {})
+        err = lerr
+        for _, e in ipairs(listing and listing.entries or {}) do
+          if not e.prefix and not err then
+            local _, derr = provider.delete(conn, d.bucket, e.key)
+            err = derr
+          end
+        end
+      else
+        local _, derr = provider.delete(conn, d.bucket, d.path)
+        err = derr
+      end
       if err then
         arbor.notify{ title = "Delete failed", message = tostring(err), level = "error" }
       else
@@ -501,12 +496,21 @@ local function read_form_into_conn(ctx, sctx)
     conn.gcs.path = ctx.sa_path or ""
     conn.gcs.secret_ref = nil
   elseif conn.gcs.method == "sa_inline" then
-    conn.gcs.secret_ref = "gcs/" .. conn.id
-    -- The textarea content is stored to the keyring once on save and never
-    -- echoed back to the UI on subsequent edits.
+    -- The key goes to the PROVIDER package, which is the one that signs with it and the only
+    -- one whose slot it can live in. The panel takes it from the user and forgets it — a
+    -- credential this package cannot use is a credential it has no business storing.
+    conn.gcs.secret_ref = nil
     if ctx.sa_json and ctx.sa_json ~= "" then
-      local _, err = arbor.cloud.secret_set(conn.gcs.secret_ref, ctx.sa_json)
-      if err then arbor.log.warn("save SA inline secret: " .. tostring(err)) end
+      arbor.service.call("cloud-" .. (conn.provider or "gcs") .. ".set-service-account",
+        { json = ctx.sa_json },
+        function(ok, res)
+          if ok and res and res.ok then return end
+          arbor.notify{
+            title   = "Service account",
+            message = tostring((res and res.error) or "the provider would not take the key"),
+            level   = "error",
+          }
+        end)
     end
   elseif conn.gcs.method == "adc" or conn.gcs.method == "gcloud_cli" then
     conn.gcs.secret_ref = nil
@@ -531,10 +535,15 @@ arbor.events.on("cloud:save_connection", function(ctx)
 
   -- For oauth-mode connections without a refresh token yet, kick off
   -- the flow immediately so the user lands on a connected state.
-  if conn.gcs.method == "oauth"
-     and (not conn.gcs.secret_ref or
-          not select(1, arbor.cloud.secret_exists(conn.gcs.secret_ref))) then
-    arbor.events.emit("cloud:start_oauth_for", { config_id = conn.id })
+  if conn.gcs.method == "oauth" then
+    -- The provider package owns the token, so it is the one that knows. Asked rather than
+    -- assumed: a connection recreated against an account that is still signed in should not
+    -- send the user through consent again.
+    arbor.service.call("cloud-gcs.status", {}, function(ok, res)
+      if not ok or not (res and res.connected) then
+        arbor.events.emit("cloud:start_oauth_for", { config_id = conn.id })
+      end
+    end)
   end
 
   arbor.notify{ title = "Connection saved", message = conn.name, level = "success" }
@@ -548,15 +557,16 @@ arbor.events.on("cloud:cancel_form", function(_ctx) end)
 arbor.events.on("cloud:test_connection_inline", function(ctx)
   local sctx = ctx.state or {}
   local conn = read_form_into_conn(ctx, sctx)
-  local env  = state.envelope(conn)
-  -- Non-blocking: arbor freezes for the duration of test_connection on slow
-  -- networks. Dispatch and listen for the result instead so the form stays
-  -- responsive. A simple counter scopes each click to its own callback.
   arbor.notify{ title = "Testing connection…", message = conn.name or "", level = "info" }
-  arbor.cloud.test_connection_async({
-    conn       = env,
-    bucket     = ctx.default_bucket or conn.default_bucket or "",
-    on_done    = "cloud:test_connection_inline_done",
+  -- One call, and it blocks this VM while the store answers — a zero-length listing, so the
+  -- wait is a round trip and not a transfer. The old shape dispatched and waited for an event
+  -- because the work was the host's; now the work is here, and an event to reach itself would
+  -- be ceremony.
+  local bucket = ctx.default_bucket or conn.default_bucket or ""
+  local _, err = provider.test(conn, bucket)
+  arbor.events.emit("cloud:test_connection_inline_done", {
+    ok         = err == nil,
+    error      = err,
     request_id = tostring(conn.id or "inline"),
   })
 end)
@@ -604,39 +614,32 @@ end)
 arbor.events.on("cloud:start_oauth_for", function(ev)
   local conn = state.find(ev.config_id)
   if not conn or conn.gcs.method ~= "oauth" then return end
-  local _, err = arbor.cloud.oauth_start({
-    secret_ref    = conn.gcs.secret_ref,
-    client_id     = ev.client_id     or conn.gcs.client_id or "",
-    client_secret = ev.client_secret or "",
-  })
-  if err then
-    arbor.notify{ title = "Authorize failed", message = tostring(err), level = "error" }
-    return
-  end
-  arbor.notify{
-    title = "Authorize with Google",
-    message = "A browser window opened. Approve the request, then come back.",
-    level = "info",
-  }
+  -- The provider package signs in: it owns the credential slot, and it is the only one that
+  -- knows which endpoints and scopes its store wants. This panel asks by name and stays
+  -- ignorant of Google — which is what lets a second store be added without editing it.
+  local service = (conn.provider or "gcs")
+  arbor.service.call("cloud-" .. service .. ".connect", {}, function(ok, res)
+    if not ok or not (res and res.ok) then
+      local msg = (res and res.error) or "the provider package could not start the sign-in"
+      arbor.notify{ title = "Authorize failed", message = tostring(msg), level = "error" }
+      return
+    end
+    -- The browser is already open: `arbor.oauth.start` did it, inside the provider package.
+    -- The URL is here for the case it did not — a machine with no default browser, a click
+    -- that went nowhere — so the user has something to copy.
+    arbor.notify{
+      title   = "Authorize",
+      message = "A browser window opened. Approve the request, then come back.",
+      level   = "info",
+    }
+  end)
 end)
 
--- Backend fires the `cloud-storage:oauth-done` hook with {ok, error?, secret_ref?}
--- once the loopback callback completes.
-arbor.events.on("cloud-storage:oauth-done", function(ev)
-  if ev and ev.ok then
-    arbor.notify{
-      title = "Cloud Storage",
-      message = "Google authorization successful — refresh token stored.",
-      level = "success",
-    }
-    sidebar.refresh()
-  else
-    arbor.notify{
-      title = "Authorize failed",
-      message = (ev and ev.error) or "unknown error",
-      level = "error",
-    }
-  end
+-- The provider package emits this when its own flow finishes — one event for every store,
+-- so this panel never learns which one ran. The provider has already told the user whether
+-- the sign-in worked; what is left here is the panel's own reaction.
+arbor.events.on("cloud:provider-connected", function(ev)
+  if ev and ev.ok then sidebar.refresh() end
 end)
 
 -- ── Delete connection (from a small confirm flow) ──────────────────────────

@@ -1,0 +1,26 @@
+[package]
+name        = "cloud-common"
+version     = "1.0.0"
+edition.workspace = true
+license.workspace = true
+description = "The parts of object storage that are the same everywhere: key handling, glob matching, chunk ordering, transfer planning, sync planning. Pure functions, no I/O — linked by every provider in this repo, and exposed to Lua by the cloud-toolkit package."
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# Signing a service-account assertion: RS256 over a JWT, which is RSA-PKCS#1v1.5 with SHA-256
+# and two base64url segments. RustCrypto rather than a JWT crate — a JWT library brings a
+# validator, a clock and an algorithm registry, and none of that is wanted here: this only
+# ever SIGNS, with one algorithm, for one audience.
+#
+# The cost is roughly 300 KB in each provider module that links it, which is why it lives here
+# once instead of in each of them.
+rsa    = { version = "0.9", features = ["pem"] }
+# `oid`, and it is load-bearing: PKCS#1 v1.5 does not sign a bare hash, it signs a DigestInfo —
+# the hash WITH the identifier of the algorithm that produced it. `Pkcs1v15Sign::new::<Sha256>()`
+# reads that identifier off the digest type through `AssociatedOid`, which sha2 only implements
+# with this feature on. Without it the code does not compile, which is the good failure; the bad
+# one would be signing an unprefixed hash and getting a signature no server accepts.
+sha2   = { version = "0.10", features = ["oid"] }
+base64 = "0.22"

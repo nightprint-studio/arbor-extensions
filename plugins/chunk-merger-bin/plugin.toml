@@ -1,6 +1,6 @@
 name        = "chunk-merger-bin"
 version     = "1.0.0"
-description = "Binary chunk concatenation handler for the cloud-storage plugin. Reassembles N downloaded chunks into a single output file by raw byte concatenation."
+description = "Retired. Chunk downloads concatenate as they go, so no merge handler is needed — this package contributes nothing and can be uninstalled."
 author      = "Nightprint Studio"
 repository  = "https://github.com/nightprint-studio/arbor-extensions"
 category    = "data"
@@ -8,19 +8,10 @@ keywords    = ["binary", "chunks", "merge", "cloud-storage"]
 arbor_api   = 1
 doc_file    = "doc.html"
 
+# No permissions: it does nothing. It used to hold filesystem write access for the merge, and
+# a retired package keeping a capability it cannot use is a capability somebody could be talked
+# into using.
 [permissions]
-# The merge service calls `arbor.cloud.concat_files{ inputs, output }` which
-# reads the chunk files from the temp dir picked by cloud-storage and writes
-# the merged blob to the user-chosen output path. Both happen on the local
-# filesystem under paths the user has just picked via the native picker.
-fs       = "write"
-fs_scope = ["*"]
-# Required so `arbor.service.export("merge", …)` at plugin-load time can
-# register the merge entry point that cloud-storage's chunks.lua calls
-# via `arbor.service.call("chunk-merger-bin.merge", …)`. Without this
-# permission the export raises at load and the plugin disappears into
-# load_failures.
-service_export = true
 
 [hooks]
 "arbor:plugin_load" = true

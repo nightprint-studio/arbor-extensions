@@ -2,6 +2,18 @@
 
 <p>Browse, upload, download and synchronise objects between Arbor and the cloud. Backed by <a href="https://opendal.apache.org/" target="_blank" rel="noopener">Apache OpenDAL</a>, with first-class support for <strong>Google Cloud Storage</strong>, <strong>Amazon S3 (and S3-compatible services like R2 / MinIO)</strong>, and <strong>Azure Blob Storage</strong>.</p>
 
+<h3>What you need installed</h3>
+<p>
+  This package is the browser and the transfers. It does not talk to any store: reaching one is
+  a <strong>provider package</strong>'s job — <code>cloud-gcs</code> for Google Cloud Storage,
+  and its siblings for the others. Without one, the panel opens and tells you which package is
+  missing instead of failing at the first listing.
+</p>
+<p>
+  <code>cloud-toolkit</code> is the other half: the shared logic for key handling, wildcard
+  matching, transfer planning and sync planning. The Marketplace offers all three together.
+</p>
+
 <h3>Setting up a connection</h3>
 
 <p>Click the <strong>Cloud</strong> icon in the right activity bar to open the sidebar, then click the <strong>Manage connections</strong> button (gear icon) in the toolbar. A two-pane modal opens — left rail groups every saved connection by provider, right pane edits the selected one. Click <strong>+ Add Google Cloud Storage</strong> to create a new connection draft. The same modal also exposes <em>edit</em> (just click a row) and <em>delete</em> (hover, click trash). Click <strong>Save</strong> at the bottom to commit all pending changes, <strong>Close</strong> to discard them. You can also reach it from the Command Palette via <em>Cloud Storage · Manage connections…</em>.</p>
@@ -65,7 +77,7 @@
   <li>Confirm the target key (prefilled with the current breadcrumb + filename) and whether to overwrite if it exists.</li>
 </ol>
 
-<p>The upload streams in 256&nbsp;KiB chunks; the Jobs overlay shows live progress, throughput and ETA. Cancel from there at any time and the transfer aborts on the next chunk boundary.</p>
+<p>The upload is sent in slices — 8&nbsp;MiB by default, changeable under Settings → Cloud Storage → Preferences. A progress card shows how much has gone; cancelling stops it at the next slice.</p>
 
 <h3>Recursive sync</h3>
 
@@ -84,7 +96,7 @@
 <h3>Security notes</h3>
 
 <ul>
-  <li>Secrets that don't fit in plain plugin settings (inline SA JSON, OAuth refresh tokens) live exclusively in your OS keychain under the service name <code>arbor-cloud-storage</code>. They are never written to disk by this plugin and never appear in exported settings.</li>
+  <li>Secrets live in your OS keychain, never on disk and never in exported settings. This package holds one slot of its own (the connection secrets it was given — an inline service-account file, an access key); a provider's OAuth token is in <em>that provider's</em> slot, which this package cannot name.</li>
   <li>The OAuth flow uses installed-app PKCE with a loopback listener on <strong>127.0.0.1:7732</strong>. Make sure no other service is listening on that port while you authorize.</li>
   <li>Service-account JSON pasted into the inline form is wiped from the textarea on save and never re-displayed.</li>
 </ul>
@@ -135,11 +147,11 @@
 <p>When at least one <strong>chunk-merger plugin</strong> is installed, two extra entries appear:</p>
 
 <ul>
-  <li><strong>Download chunks (auto-order by date)</strong> — sorts the selected objects by last-modified ascending, downloads them to a temp dir (<code>&lt;output&gt;.chunks/</code>), then hands the local paths to the chunk-handler plugin which writes the merged output. Tie-break is alphabetic on path when timestamps match.</li>
-  <li><strong>Download chunks (custom order…)</strong> — opens a drag-reorder picker so you can place the parts manually. Same flow as above once you click Continue.</li>
+  <li><strong>Download chunks (auto-order by date)</strong> — sorts the selected objects oldest-first and downloads them <em>straight into the output file</em>, one after another. The concatenation is the download: nothing is written twice, no temp folder is left behind, and a 40&nbsp;GB archive never exists twice on your disk.</li>
+  <li><strong>Download chunks (custom order…)</strong> — opens a list you can rearrange, with the keyboard: <kbd>↑</kbd>/<kbd>↓</kbd> to move the selection, <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd> to move the part. The top row is written first.</li>
 </ul>
 
-<p>The progress modal switches to a "Merge" phase once the downloads finish; the chunk-handler can push a per-step note (e.g. <em>Concatenating 2/3…</em>) through <code>arbor.cloud.report_progress</code>.</p>
+<p>A <strong>chunk-merger plugin</strong> is only needed when the merge is not a plain concatenation — a format with a header per part, one that needs padding stripped, one that verifies a checksum. Those get the parts on disk, in order, in a temp folder that is cleaned up afterwards, and their own progress card while they work.</p>
 
 <h3>Extending the plugin (chunk-merger contributions)</h3>
 
@@ -155,17 +167,19 @@
 })
 
 arbor.service.export("merge", function(args)
-  -- args.stream_id    : string (also used for arbor.cloud.is_cancelled checks)
-  -- args.inputs       : [string]  local paths in the chosen order
+  -- args.inputs       : [string]  local paths, in the chosen order
   -- args.output       : string    user-picked target path
-  -- args.source_paths : [string]  original remote paths (for logging)
+  -- args.source_paths : [string]  original remote keys (for logging)
   -- args.tempdir      : string    where `inputs` live (cleaned up on ok)
-  local ok, err = arbor.cloud.concat_files{ inputs = args.inputs, output = args.output }
-  return ok and { ok = true } or { ok = false, error = tostring(err) }
+  --
+  -- Only register a handler when the merge is NOT a plain concatenation: with no handler the
+  -- parts are appended to the output as they download, which needs no temp folder and no
+  -- second pass over the bytes.
+  return do_the_real_work(args)
 end)</code></pre>
 
 <p>If more than one chunk-handler plugin is installed, the user is prompted to pick one each time. The contribution registry is re-scanned every time the sidebar opens, so installing or disabling a handler is reflected on the next visit.</p>
 
-<h3>Heads-up — early version</h3>
+<h3>Where the work happens</h3>
 
-<p>This plugin currently ships with its heavy dependencies (opendal) bundled directly in the Arbor host binary, the same way <strong>JSON Studio</strong> does. When the WASM plugin runtime lands, the entire host-side cloud module is deleted and the plugin gains its own WASM crate. The Lua surface (<code>arbor.cloud.*</code>) is designed to stay backwards-compatible across that migration, but the in-process Tauri commands (<code>cloud_list</code>, <code>cloud_download</code>, …) will go away.</p>
+<p>All of it is in packages. The store is reached by a provider extension, the shared logic comes from <code>cloud-toolkit</code>, and the browsing, transfers and sync loops are this package's Lua. Arbor lends four things and knows nothing about buckets: the progress cards, the two calls that move bytes between an extension and a file without them passing through Lua, the OAuth engine each provider drives, and the keychain.</p>

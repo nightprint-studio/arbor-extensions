@@ -28,39 +28,29 @@ wit_bindgen::generate!({
     world: "cloud-provider-world",
 });
 
-use exports::arbor::extensions::cloud_provider::{
-    Connection as ConnectionHandle, Guest, GuestConnection,
-};
-use arbor::extensions::cloud_types::{Error, Listing, Object, Range};
+use exports::arbor::extensions::cloud_provider::Guest;
+use arbor::extensions::cloud_types::{Error, Listing, Object, Range, Target, Token};
 use arbor::extensions::http::{Header, Request};
 use arbor::extensions::log::Level;
+
+// The shared half, linked rather than copied. `encode_segment` is the one that bites: a key
+// with a raw `/` turns `stat("a/b.txt")` into a request for something that does not exist,
+// and the store's 404 blames the object instead of the URL. Tested once, in `cloud-common`,
+// and used by every provider and by the toolkit the panel calls.
+use cloud_common::prelude::{
+    assertion, assertion_form, encode_segment as enc, rfc3339_secs, ServiceAccount,
+};
 
 const API: &str = "https://storage.googleapis.com/storage/v1";
 const UPLOAD: &str = "https://storage.googleapis.com/upload/storage/v1";
 /// The key this package declared in `[[credentials]]`. Asking for any other name is refused
 /// by the host, so this constant is the whole of what this component can reach.
 const TOKEN_KEY: &str = "oauth";
+/// What a minted token is asked to cover. The same scope the interactive sign-in requests, so
+/// a connection behaves identically whichever way it authenticated.
+const SCOPE: &str = "https://www.googleapis.com/auth/devstorage.read_write";
 
 // ── Small helpers ───────────────────────────────────────────────────────────────
-
-/// Percent-encode a path segment.
-///
-/// Object keys contain `/` as an ordinary character — `a/b.txt` is one key, not two segments
-/// — so a key going into a URL path must have its slashes encoded too. Getting this wrong
-/// turns `stat("a/b.txt")` into a request for an object called `b.txt` inside something that
-/// does not exist, and the 404 blames the wrong thing.
-fn enc(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    for b in s.as_bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(*b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
 
 /// Encode a query-string value. Same rules; kept separate because a future change to one
 /// (space as `+`, say) must not silently apply to the other.
@@ -162,32 +152,6 @@ struct GcsListing {
     next_page_token: Option<String>,
 }
 
-/// RFC 3339 → unix seconds.
-///
-/// Hand-rolled because a date crate is a surprising amount of a small module's compiled size,
-/// and the shape is fixed: GCS emits `2026-08-20T14:03:11.123Z`, always UTC, always this
-/// layout. Anything else yields `None`, which the interface already allows.
-fn rfc3339_secs(s: &str) -> Option<u64> {
-    let b = s.as_bytes();
-    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' {
-        return None;
-    }
-    let n = |from: usize, to: usize| s[from..to].parse::<i64>().ok();
-    let (y, mo, d) = (n(0, 4)?, n(5, 7)?, n(8, 10)?);
-    let (h, mi, sec) = (n(11, 13)?, n(14, 16)?, n(17, 19)?);
-    // Days since the epoch, by the civil-from-days algorithm (Howard Hinnant's). Correct for
-    // every proleptic Gregorian date, which is more than enough for an object's mtime.
-    let y_adj = if mo <= 2 { y - 1 } else { y };
-    let era = if y_adj >= 0 { y_adj } else { y_adj - 399 } / 400;
-    let yoe = y_adj - era * 400;
-    let mp = (mo + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    let total = days * 86_400 + h * 3_600 + mi * 60 + sec;
-    u64::try_from(total).ok()
-}
-
 fn to_object(o: GcsObject) -> Object {
     Object {
         key: o.name,
@@ -215,51 +179,52 @@ fn to_prefix(p: String) -> Object {
     }
 }
 
-// ── The exported resource ───────────────────────────────────────────────────────
+// ── The exported interface ──────────────────────────────────────────────────────
+//
+// Whole calls: each one carries the target it acts on. There is no connection to open, which
+// is what makes this callable from Lua through `arbor.ext.call` — see the interface's own doc
+// for why a resource made this package reachable only by Arbor.
 
-struct Connection {
-    bucket: String,
+/// Validate the target and hand back the bucket to build URLs from.
+///
+/// The config is this provider's own JSON, and GCS needs nothing from it beyond the bucket
+/// today. Parsed anyway so a malformed one fails as a config error naming itself, rather than
+/// as a listing that returns nothing for a reason the user cannot see.
+fn target(at: &Target) -> Result<&str, Error> {
+    let bucket = at.bucket.trim();
+    if bucket.is_empty() {
+        return Err(Error::Config("no bucket name".into()));
+    }
+    if !at.config.trim().is_empty() {
+        serde_json::from_str::<serde_json::Value>(&at.config)
+            .map_err(|e| Error::Config(format!("connection config is not JSON: {e}")))?;
+    }
+    Ok(bucket)
 }
 
-impl GuestConnection for Connection {
-    fn open(bucket: String, config: String) -> Result<ConnectionHandle, Error> {
-        if bucket.trim().is_empty() {
-            return Err(Error::Config("no bucket name".into()));
-        }
-        // The config is this provider's own JSON, and GCS needs nothing from it beyond the
-        // bucket today. Parsed anyway so a malformed one fails at connect time rather than at
-        // the first listing, when the user has stopped associating it with what they typed.
-        if !config.trim().is_empty() {
-            serde_json::from_str::<serde_json::Value>(&config)
-                .map_err(|e| Error::Config(format!("connection config is not JSON: {e}")))?;
-        }
-        arbor::extensions::log::write(Level::Info, &format!("gcs: opened bucket '{bucket}'"));
-        Ok(ConnectionHandle::new(Connection { bucket }))
-    }
+struct Provider;
 
+impl Guest for Provider {
     /// A zero-length listing: cheap, side-effect free, and it exercises exactly the two things
     /// that go wrong — the token and the bucket's existence.
-    fn test(&self) -> Result<(), Error> {
+    fn test(at: Target) -> Result<(), Error> {
+        let bucket = target(&at)?;
         let t = token()?;
-        call(
-            "GET",
-            format!("{API}/b/{}/o?maxResults=0", enc(&self.bucket)),
-            &t,
-            vec![],
-            None,
-        )?;
+        call("GET", format!("{API}/b/{}/o?maxResults=0", enc(bucket)), &t, vec![], None)?;
+        arbor::extensions::log::write(Level::Info, &format!("gcs: '{bucket}' answered"));
         Ok(())
     }
 
     fn list(
-        &self,
+        at: Target,
         prefix: String,
         delimiter: Option<String>,
         cursor: Option<String>,
         limit: Option<u32>,
     ) -> Result<Listing, Error> {
+        let bucket = target(&at)?;
         let t = token()?;
-        let mut url = format!("{API}/b/{}/o?", enc(&self.bucket));
+        let mut url = format!("{API}/b/{}/o?", enc(bucket));
         if !prefix.is_empty() {
             url.push_str(&format!("prefix={}&", enc_query(&prefix)));
         }
@@ -283,11 +248,12 @@ impl GuestConnection for Connection {
         Ok(Listing { entries, cursor: parsed.next_page_token })
     }
 
-    fn stat(&self, key: String) -> Result<Object, Error> {
+    fn stat(at: Target, key: String) -> Result<Object, Error> {
+        let bucket = target(&at)?;
         let t = token()?;
         let body = call(
             "GET",
-            format!("{API}/b/{}/o/{}", enc(&self.bucket), enc(&key)),
+            format!("{API}/b/{}/o/{}", enc(bucket), enc(&key)),
             &t,
             vec![],
             None,
@@ -297,7 +263,8 @@ impl GuestConnection for Connection {
         Ok(to_object(o))
     }
 
-    fn read(&self, key: String, part: Option<Range>) -> Result<Vec<u8>, Error> {
+    fn read(at: Target, key: String, part: Option<Range>) -> Result<Vec<u8>, Error> {
+        let bucket = target(&at)?;
         let t = token()?;
         let mut extra = Vec::new();
         if let Some(r) = part {
@@ -312,7 +279,7 @@ impl GuestConnection for Connection {
         }
         match call(
             "GET",
-            format!("{API}/b/{}/o/{}?alt=media", enc(&self.bucket), enc(&key)),
+            format!("{API}/b/{}/o/{}?alt=media", enc(bucket), enc(&key)),
             &t,
             extra,
             None,
@@ -328,18 +295,19 @@ impl GuestConnection for Connection {
     }
 
     fn write(
-        &self,
+        at: Target,
         key: String,
         body: Vec<u8>,
         content_type: Option<String>,
     ) -> Result<(), Error> {
+        let bucket = target(&at)?;
         let t = token()?;
         let ct = content_type.unwrap_or_else(|| "application/octet-stream".to_string());
         call(
             "POST",
             format!(
                 "{UPLOAD}/b/{}/o?uploadType=media&name={}",
-                enc(&self.bucket),
+                enc(bucket),
                 enc_query(&key)
             ),
             &t,
@@ -349,11 +317,12 @@ impl GuestConnection for Connection {
         Ok(())
     }
 
-    fn delete(&self, key: String) -> Result<(), Error> {
+    fn delete(at: Target, key: String) -> Result<(), Error> {
+        let bucket = target(&at)?;
         let t = token()?;
         match call(
             "DELETE",
-            format!("{API}/b/{}/o/{}", enc(&self.bucket), enc(&key)),
+            format!("{API}/b/{}/o/{}", enc(bucket), enc(&key)),
             &t,
             vec![],
             None,
@@ -366,7 +335,67 @@ impl GuestConnection for Connection {
         }
     }
 
-    fn copy(&self, source: String, destination: String) -> Result<(), Error> {
+    /// A service-account key in, an access token out.
+    ///
+    /// Two steps and no state: sign an assertion with the key, post it to the token endpoint.
+    /// The caller stores what comes back — this guest is instantiated per call and could not
+    /// keep it if it wanted to.
+    fn mint_token(credential: String, scope: String, now_secs: u64) -> Result<Token, Error> {
+        let sa: ServiceAccount = serde_json::from_str(&credential).map_err(|e| {
+            Error::Config(format!("this is not a Google service-account key file: {e}"))
+        })?;
+
+        arbor::extensions::log::write(Level::Debug, "gcs: minting an access token");
+
+        // The time comes from the caller: a guest has no clock, and this is the one field that
+        // needs one.
+        let jwt = assertion(&sa, if scope.is_empty() { SCOPE } else { &scope }, now_secs)
+            .map_err(Error::Auth)?;
+
+        let req = Request {
+            method: "POST".to_string(),
+            url: sa.token_uri.clone(),
+            headers: vec![header("content-type", "application/x-www-form-urlencoded".into())],
+            body: Some(assertion_form(&jwt).into_bytes()),
+            timeout_secs: Some(30),
+        };
+        let res = arbor::extensions::http::send(&req).map_err(|e| match e {
+            arbor::extensions::http::Error::NotAllowed(h) => Error::Transport(format!(
+                "'{h}' is not in this package's network allowlist"
+            )),
+            arbor::extensions::http::Error::Transport(m) => Error::Transport(m),
+            arbor::extensions::http::Error::Invalid(m) => Error::Config(m),
+        })?;
+        if res.status >= 400 {
+            // The endpoint's own words: an unauthorized_client here means the key is real and
+            // the account is not entitled, which is a different fix from a malformed key.
+            return Err(Error::Auth(format!(
+                "the token endpoint refused the assertion ({}): {}",
+                res.status,
+                String::from_utf8_lossy(&res.body).chars().take(300).collect::<String>()
+            )));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct TokenResponse {
+            access_token: String,
+            #[serde(default)]
+            expires_in: Option<u64>,
+        }
+        let parsed: TokenResponse = serde_json::from_slice(&res.body).map_err(|e| {
+            Error::Remote((None, format!("the token response is not the expected JSON: {e}")))
+        })?;
+
+        Ok(Token {
+            access_token: parsed.access_token,
+            // An hour is what Google issues and what every other endpoint of theirs assumes;
+            // a response without the field is not a token that lasts forever.
+            expires_in: parsed.expires_in.unwrap_or(3600),
+        })
+    }
+
+    fn copy(at: Target, source: String, destination: String) -> Result<(), Error> {
+        let bucket = target(&at)?;
         let t = token()?;
         // Server-side, so the bytes never travel through this machine — which for a
         // multi-gigabyte object is the difference between instant and a download plus an
@@ -375,7 +404,7 @@ impl GuestConnection for Connection {
             "POST",
             format!(
                 "{API}/b/{b}/o/{f}/copyTo/b/{b}/o/{t2}",
-                b = enc(&self.bucket),
+                b = enc(bucket),
                 f = enc(&source),
                 t2 = enc(&destination)
             ),
@@ -387,57 +416,12 @@ impl GuestConnection for Connection {
     }
 }
 
-struct Provider;
-
-impl Guest for Provider {
-    type Connection = Connection;
-}
-
 export!(Provider);
 
 #[cfg(test)]
 mod tests {
-    use super::{enc, rfc3339_secs};
-
-    #[test]
-    fn a_key_with_slashes_is_encoded_whole() {
-        // The bug this prevents: `a/b.txt` is ONE key, and leaving the slash raw turns a stat
-        // into a request for `b.txt` inside a bucket path that does not exist — so the 404
-        // blames the object instead of the URL.
-        assert_eq!(enc("a/b.txt"), "a%2Fb.txt");
-        assert_eq!(enc("plain.txt"), "plain.txt");
-        assert_eq!(enc("with space"), "with%20space");
-        assert_eq!(enc("uni\u{00e0}"), "uni%C3%A0");
-    }
-
-    #[test]
-    fn unreserved_characters_survive_untouched() {
-        assert_eq!(enc("a-b_c.d~e09"), "a-b_c.d~e09");
-    }
-
-    #[test]
-    fn a_gcs_timestamp_becomes_unix_seconds() {
-        // 2026-08-20T14:03:11Z. Checked against a known value rather than a round trip, so a
-        // wrong-but-self-consistent implementation cannot pass.
-        assert_eq!(rfc3339_secs("2026-08-20T14:03:11.123Z"), Some(1_787_234_591));
-        assert_eq!(rfc3339_secs("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(rfc3339_secs("2000-03-01T00:00:00Z"), Some(951_868_800));
-    }
-
-    #[test]
-    fn a_leap_day_is_not_off_by_one() {
-        // The civil-from-days algorithm shifts the year in January and February; getting that
-        // wrong is invisible for ten months of the year.
-        assert_eq!(rfc3339_secs("2024-02-29T00:00:00Z"), Some(1_709_164_800));
-        assert_eq!(rfc3339_secs("2024-03-01T00:00:00Z"), Some(1_709_251_200));
-    }
-
-    #[test]
-    fn anything_that_is_not_that_shape_yields_nothing() {
-        // The interface allows `none`, so a surprise format is a missing column and not a
-        // fabricated date.
-        assert_eq!(rfc3339_secs(""), None);
-        assert_eq!(rfc3339_secs("yesterday"), None);
-        assert_eq!(rfc3339_secs("2026/08/20 14:03:11"), None);
-    }
+    // The key encoder and the timestamp parser are tested where they live now
+    // (`cloud-common`), which is also where every other provider gets them. What is left here
+    // is this provider's own translation of the GCS JSON shapes, and it needs a listing
+    // fixture rather than a unit test — see the package's doc for the manual check.
 }

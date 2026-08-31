@@ -1,0 +1,22 @@
+name        = "cloud-toolkit"
+version     = "1.0.0"
+description = "Shared object-storage logic — key handling, glob matching, transfer and sync planning, chunk ordering. Called by the cloud panel; linked by the providers."
+author      = "Nightprint Studio"
+repository  = "https://github.com/nightprint-studio/arbor-extensions"
+category    = "data"
+keywords    = ["cloud", "storage", "sync", "toolkit"]
+arbor_api   = 1
+doc_file    = "doc.html"
+
+# No `[lua]` section and no `[permissions]` block, and both absences are the point: this
+# package computes and nothing else. It has no network, no filesystem, no credential slots —
+# there is nothing to grant it and nothing it can be talked into reaching.
+
+[[provides]]
+interface = "cloud-util"
+version   = 1
+id        = "core"
+module    = "cloud_toolkit.wasm"
+
+[wasm]
+target = "wasm32-wasip2"

@@ -13,5 +13,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wit-bindgen = { workspace = true }
+# Key handling and timestamps, shared with every other provider and with the toolkit the
+# panel calls. Linked rather than called: a guest cannot call another guest, and this is
+# the same code either way.
+cloud-common = { path = "../../../crates/cloud-common" }
 serde       = { workspace = true }
 serde_json  = { workspace = true }

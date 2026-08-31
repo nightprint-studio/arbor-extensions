@@ -6,14 +6,24 @@
 -- Chunk-merge flow:
 --   1. user picks "Download chunks (auto)" / "(custom order)" on N files
 --   2. we pick the output path (save picker), resolve handler (radio if >1)
---   3. for "custom": open the drag-reorder modal; receive the order
---   4. download_many to a temp dir → host streams + modal updates
---   5. on download-many-done, fire the chosen chunk-handler service with the
---      local_paths in the requested order
---   6. push the merge phase + done events to the modal via report_progress
---      / report_done
+--   3. for "custom": a `reorder_list` form; its value IS the order
+--   4. with no handler package: the parts are appended to the output as they arrive, so the
+--      download IS the concatenation — no temp directory, nothing written twice
+--   5. with a handler package: the parts land in a temp directory and the package is called
+--      with them in order, because some merges are not concatenations
 
-local state    = require("state")
+local state     = require("state")
+local transfers = require("transfers")
+local provider  = require("provider")
+
+--- Size for a person, for the order list's right-hand column.
+local function human_size(n)
+  local units = { "B", "KB", "MB", "GB", "TB" }
+  local v, i = n or 0, 1
+  while v >= 1024 and i < #units do v = v / 1024 i = i + 1 end
+  if i == 1 then return string.format("%d %s", v, units[i]) end
+  return string.format("%.1f %s", v, units[i])
+end
 local sidebar  = require("ui.sidebar")
 local settings = require("settings")
 
@@ -21,14 +31,10 @@ local M = {}
 
 local CHUNK_HANDLERS_POINT = "cloud-storage:cloud:chunk-handlers"
 
--- In-flight chunk-merge bookkeeping keyed by stream_id. Populated when we
--- kick off download_many and consumed in the `done` hook.
-M._pending = {}
-
 -- Re-entrancy guard for the chunk-merge entry flow. Cleared when either
 -- (a) the save-picker is cancelled, (b) the handler-picker is cancelled,
--- or (c) the download_many call has been spawned (we hold the actual
--- per-stream state in `M._pending[stream_id]` after that point).
+-- or (c) the download has started (from there on the flow runs to its end
+-- inside one call, so there is nothing left to re-enter).
 -- Without this guard, a double-fire of `cloud:multi_dl_chunks_auto` (e.g.
 -- a double-clicked context-menu entry) would launch two parallel
 -- download_many runs, both pointing at the same temp dir and the same
@@ -120,27 +126,18 @@ arbor.events.on("cloud:multi_download_target_picked", function(ctx)
   local conn = state.find(ctx.config_id)
   if not conn or not ctx.bucket then return end
 
-  local stream_id = ts_now_id("cloud-bulk")
-  local _, err = arbor.cloud.download_many({
-    conn      = state.envelope(conn),
-    bucket    = ctx.bucket,
-    paths     = ctx.paths,
-    local_dir = local_dir,
-    parallel  = settings.parallel_downloads(),
-    op_label  = "Downloading " .. #ctx.paths .. " file(s)",
-    stream_id = stream_id,
+  local _, err = transfers.download_many(conn, ctx.bucket, ctx.paths, local_dir, {
+    subtitle = local_dir,
   })
   if err then
     arbor.notify{ title = "Download", message = tostring(err), level = "error" }
     return
   end
-  -- The modal auto-opens on the first progress event. No merge phase here.
-  -- `local_dir` is stashed so on_download_many_done can show a notify with
-  -- an "Open folder" action pointing at the destination directory.
-  M._pending[stream_id] = {
-    kind      = "bulk",
-    local_dir = local_dir,
-    count     = #ctx.paths,
+  arbor.notify{
+    title   = "Download complete",
+    message = #ctx.paths .. " file(s) saved to " .. local_dir,
+    level   = "success",
+    action  = { kind = "open-path", label = "Open folder", path = local_dir, reveal = false },
   }
 end)
 
@@ -160,10 +157,9 @@ function M.multi_delete(ctx)
     confirm_kind  = "danger",
     cancel_label  = "Cancel",
     on_confirm    = function()
-      local env = state.envelope(conn)
       local fails = 0
       for _, p in ipairs(paths) do
-        local _, err = arbor.cloud.delete({ conn = env, bucket = bucket, path = p })
+        local _, err = provider.delete(conn, bucket, p)
         if err then fails = fails + 1 end
       end
       if fails > 0 then
@@ -349,11 +345,31 @@ function M._after_handler_resolved()
     -- Sort by last_modified asc (same as auto) as a sane starting point.
     table.sort(items, function(a, b) return (a.path or "") < (b.path or "") end)
 
-    arbor.cloud.pick_chunk_order({
-      op_label = "Order chunks for merge",
-      action   = "cloud:chunk-order-picked",
-      items    = items,
-      extra    = { setup_key = "current" },
+    -- A form the plugin owns, not a modal the host carries: `reorder_list` is a form node
+    -- like any other, and the order it answers with is the sequence the concatenation uses.
+    -- Keyboard-first (Alt+↑/↓), which the old drag-only dialog was not — and which mattered
+    -- more than it sounds, because HTML5 drag does not work on Windows' WebView2 at all.
+    local rows = {}
+    for _, it in ipairs(items) do
+      rows[#rows + 1] = {
+        id       = it.path,
+        label    = it.label or it.path,
+        sublabel = it.meta,
+        meta     = it.size and human_size(it.size) or nil,
+      }
+    end
+    arbor.ui.form({
+      title        = "Order chunks for merge",
+      width        = "640px",
+      height       = "520px",
+      submit_label = "Download and merge",
+      cancel_label = "Cancel",
+      submit_action = "cloud:chunk-order-picked",
+      nodes = {
+        { type = "label",
+          text = "The top row is written first. Alt+↑ / Alt+↓ move the selected part." },
+        { type = "reorder_list", name = "order", items = rows },
+      },
     })
     return
   end
@@ -389,207 +405,120 @@ function M.on_chunk_order_picked(ctx)
     M._chunks_flow_busy = false
     return
   end
-  if not ctx.ok then
+  -- The node's value is the ids in the order shown, and the ids are the object keys — so the
+  -- form answers with exactly the list the download needs.
+  local ordered = ctx.order
+  if type(ordered) ~= "table" or #ordered == 0 then
     M._pending_setup = nil
     M._chunks_flow_busy = false
     return
   end
-  M._kick_off_download(setup, ctx.ordered_paths or {})
+  pcall(function() arbor.ui.form.close() end)
+  M._kick_off_download(setup, ordered)
 end
 
 function M._kick_off_download(setup, ordered_paths)
   M._pending_setup = nil
-  -- Flow guard can be released here: per-stream state now lives in
-  -- M._pending[stream_id] keyed by the unique stream id, so any further
-  -- entries to multi_dl_chunks would race on disjoint streams (and that's
-  -- a legitimate flow we don't want to block).
   M._chunks_flow_busy = false
   if #ordered_paths == 0 then return end
 
-  -- Per-stream temp dir under the user's chosen output: place chunks under
-  -- `<output>.chunks/` so cleanup is obvious if the merge fails mid-way.
-  local tempdir = setup.output .. ".chunks"
-  local stream_id = ts_now_id("cloud-merge")
-  local out_name  = setup.output:match("([^/\\]+)$") or "merged"
+  local out_name = setup.output:match("([^/\\]+)$") or "merged"
+  local handler_payload = (setup.handler and setup.handler.payload) or {}
+  local service_name    = handler_payload.service
 
-  M._pending[stream_id] = {
-    kind         = "merge",
-    handler      = setup.handler,
-    output       = setup.output,
-    tempdir      = tempdir,
-    ordered_paths = ordered_paths,
-  }
-
-  -- `keep_open=true` + an appended "merge" step makes the OperationsOverlay
-  -- card span both phases. After all per-file download steps complete the
-  -- card stays open showing the "merge" step pending; the merge orchestrator
-  -- below activates it via `report_progress` and closes via `report_done`.
-  local _, err = arbor.cloud.download_many({
-    conn        = state.envelope(setup.conn),
-    bucket      = setup.bucket,
-    paths       = ordered_paths,
-    local_dir   = tempdir,
-    parallel    = settings.parallel_downloads(),
-    op_label    = "Downloading " .. #ordered_paths .. " chunk(s) · " .. out_name,
-    stream_id   = stream_id,
-    extra_steps = {
-      { key = "merge", label = "Merge chunks → " .. out_name },
-    },
-    keep_open   = true,
-  })
-  if err then
-    arbor.notify{ title = "Download chunks", message = tostring(err), level = "error" }
-    M._pending[stream_id] = nil
-  end
-end
-
--- ── download-many-done — bulk vs merge ────────────────────────────────────
-
-function M.on_download_many_done(ev)
-  local p = M._pending[ev.stream_id]
-  if not p then return end
-  M._pending[ev.stream_id] = nil
-
-  if p.kind == "bulk" then
-    if ev.ok then
-      local n = p.count or (ev.local_paths and #ev.local_paths) or 0
-      local msg = (n > 0)
-        and (tostring(n) .. " file" .. (n == 1 and "" or "s")
-             .. " saved to " .. (p.local_dir or "?"))
-        or  "Done."
-      arbor.notify{
-        title   = "Download complete",
-        message = msg,
-        level   = "success",
-        action  = (p.local_dir and p.local_dir ~= "") and {
-          kind   = "open-path",
-          label  = "Open folder",
-          path   = p.local_dir,
-          reveal = false,  -- local_dir IS the folder; just open it
-        } or nil,
-      }
-    else
-      arbor.notify{ title = "Download failed",
-                    message = tostring(ev.error or "failed"),
-                    level = "error" }
+  -- ── The common case: there is nothing to merge ────────────────────────────
+  --
+  -- Parts appended to the output as they arrive ARE the concatenation. No temp directory,
+  -- nothing written twice, and a 40 GB archive never exists twice on the disk — which the
+  -- download-then-merge shape required, along with a second pass over every byte.
+  if not service_name or service_name == "" then
+    local _, err = transfers.download_concat(setup.conn, setup.bucket, ordered_paths, setup.output, {
+      subtitle = out_name,
+    })
+    if err then
+      arbor.notify{ title = "Chunks download failed", message = tostring(err), level = "error" }
+      return
     end
+    arbor.notify{
+      title   = "Chunks merged",
+      message = #ordered_paths .. " parts → " .. out_name,
+      level   = "success",
+      action  = (setup.output and setup.output ~= "") and {
+        kind = "open-path", label = "Open folder", path = setup.output, reveal = true,
+      } or nil,
+    }
     return
   end
 
-  if p.kind == "merge" then
-    if not ev.ok then
-      -- Download phase failed/cancelled: the backend already closed the
-      -- card with an error summary, so report_done would be a no-op here.
-      -- The pending-ops map was already wiped on that path too. Still
-      -- surface a bell notification so the user has a persistent record
-      -- of the failure outside the auto-dismissed OperationsOverlay.
-      arbor.notify{
-        title   = "Chunks download failed",
-        message = tostring(ev.error or "download failed"),
-        level   = "error",
-      }
-      return
-    end
-
-    -- Activate the appended "merge" step on the same OperationsOverlay
-    -- card the download phase populated.
-    arbor.cloud.report_progress({
-      stream_id = ev.stream_id,
-      step      = "merge",
-      detail    = "Concatenating " .. #ev.local_paths .. " chunk(s)…",
-    })
-
-    local handler_payload = (p.handler and p.handler.payload) or {}
-    local service_name = handler_payload.service
-    local out_name = (p.output or ""):match("([^/\\]+)$") or "merged"
-    if not service_name or service_name == "" then
-      arbor.cloud.report_done({
-        stream_id = ev.stream_id, ok = false,
-        error     = "handler has no service",
-      })
-      return
-    end
-
-    -- Second line of defence: even though `multi_dl_chunks` already gates
-    -- on `arbor.service.call` at entry, the VM that's actually running
-    -- this hook handler may be stale (manifest edited mid-session,
-    -- plugin not refreshed since). If `arbor.service` is nil here we'd
-    -- index-nil at the .call site, the hook dispatcher would swallow the
-    -- runtime error, and the OperationsOverlay card would never close.
-    -- Close it explicitly with a user-actionable error instead.
-    if type(arbor.service) ~= "table" or type(arbor.service.call) ~= "function" then
-      arbor.cloud.report_done({
-        stream_id = ev.stream_id, ok = false,
-        error     = "arbor.service.call unavailable — Refresh Plugins after "
-                 .. "manifest changes (or add `service_call = true` to "
-                 .. "cloud-storage's plugin.toml [permissions]).",
-      })
-      arbor.notify{
-        title   = "Merge skipped",
-        message = "cloud-storage VM is stale — click Refresh in the Plugin "
-               .. "Manager to apply the latest plugin.toml.",
-        level   = "error",
-      }
-      return
-    end
-
-    arbor.service.call(service_name, {
-      stream_id    = ev.stream_id,
-      inputs       = ev.local_paths,
-      output       = p.output,
-      source_paths = p.ordered_paths,
-      tempdir      = p.tempdir,
-    }):ok(function(result)
-      local ok    = (result and result.ok ~= false) and not result.error
-      local err   = result and result.error or nil
-      arbor.cloud.report_done({
-        stream_id = ev.stream_id,
-        ok        = ok,
-        summary   = ok and ("Merged into " .. out_name) or nil,
-        error     = err,
-      })
-      if ok then
-        -- Best-effort cleanup of the chunk temp dir.
-        for _, p_in in ipairs(ev.local_paths) do
-          pcall(function() arbor.fs.delete(p_in) end)
-        end
-        pcall(function() arbor.fs.delete(p.tempdir) end)
-        -- Persisted bell notification with an "Open folder" action that
-        -- reveals the merged file in Explorer/Finder. Sticking around in
-        -- the bell archive is intentional: the OperationsOverlay card
-        -- auto-dismisses after a few seconds, but the user may glance
-        -- back later wanting "where did that merged file go?".
-        arbor.notify{
-          title   = "Chunks merged",
-          message = #ev.local_paths .. " chunks → " .. out_name,
-          level   = "success",
-          action  = (p.output and p.output ~= "") and {
-            kind   = "open-path",
-            label  = "Open folder",
-            path   = p.output,
-            reveal = true,  -- p.output is the merged file; reveal its parent
-          } or nil,
-        }
-      else
-        arbor.notify{
-          title   = "Chunk merge failed",
-          message = tostring(err or "merge failed"),
-          level   = "error",
-        }
-      end
-    end):err(function(e)
-      arbor.cloud.report_done({
-        stream_id = ev.stream_id,
-        ok        = false,
-        error     = "merge handler error: " .. tostring(e and e.message or e),
-      })
-      arbor.notify{
-        title   = "Chunk merge failed",
-        message = tostring(e and e.message or e),
-        level   = "error",
-      }
-    end)
+  -- ── A handler package wants the parts ─────────────────────────────────────
+  --
+  -- Some merges are not concatenations: a format with a header per part, one that needs
+  -- padding stripped, one that verifies a checksum. Those packages get what they have always
+  -- got — the parts on disk, in order — and the temp directory exists for them alone.
+  local tempdir = setup.output .. ".chunks"
+  local _, err, paths = transfers.download_many(setup.conn, setup.bucket, ordered_paths, tempdir, {
+    subtitle = out_name,
+  })
+  if err then
+    arbor.notify{ title = "Chunks download failed", message = tostring(err), level = "error" }
+    return
   end
+
+  if type(arbor.service) ~= "table" or type(arbor.service.call) ~= "function" then
+    arbor.notify{
+      title   = "Merge skipped",
+      message = "arbor.service.call is unavailable — click Refresh in the Plugin Manager to "
+             .. "apply the latest plugin.toml.",
+      level   = "error",
+    }
+    return
+  end
+
+  -- Its own card: the download's has already closed, and a merge that takes minutes with no
+  -- progress anywhere reads as a hang.
+  local op_id = "cloud:merge:" .. tostring(os.time())
+  arbor.ui.operation.start{
+    id       = op_id,
+    title    = "Merging " .. #paths .. " parts",
+    subtitle = out_name,
+    steps    = { { key = "merge", label = "Merging" } },
+    current  = "merge",
+  }
+
+  arbor.service.call(service_name, {
+    inputs       = paths,
+    output       = setup.output,
+    source_paths = ordered_paths,
+    tempdir      = tempdir,
+  }):ok(function(result)
+    local ok  = (result and result.ok ~= false) and not result.error
+    local err2 = result and result.error or nil
+    pcall(function()
+      arbor.ui.operation.finish(op_id, {
+        summary = ok and ("Merged into " .. out_name) or nil,
+        error   = err2,
+      })
+    end)
+    if ok then
+      for _, p_in in ipairs(paths) do pcall(function() arbor.fs.delete(p_in) end) end
+      pcall(function() arbor.fs.delete(tempdir) end)
+      arbor.notify{
+        title   = "Chunks merged",
+        message = #paths .. " chunks → " .. out_name,
+        level   = "success",
+        action  = (setup.output and setup.output ~= "") and {
+          kind = "open-path", label = "Open folder", path = setup.output, reveal = true,
+        } or nil,
+      }
+    else
+      arbor.notify{ title = "Chunk merge failed", message = tostring(err2 or "merge failed"),
+                    level = "error" }
+    end
+  end):err(function(e)
+    local msg = tostring(e and e.message or e)
+    pcall(function() arbor.ui.operation.finish(op_id, { error = "merge handler error: " .. msg }) end)
+    arbor.notify{ title = "Chunk merge failed", message = msg, level = "error" }
+  end)
 end
 
 return M

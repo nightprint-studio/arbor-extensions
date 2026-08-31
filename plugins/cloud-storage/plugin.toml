@@ -32,6 +32,25 @@ fs_scope = ["*"]
 # "Concatenating chunks…" forever.
 service_call = true
 
+# The panel's own secrets — a service-account file's contents, an access key — as one JSON
+# document keyed by connection. One slot rather than one per connection because slots are
+# declared statically and connections are made at runtime; the alternative would be a manifest
+# that has to be edited to add a bucket.
+#
+# A provider's OAuth token is NOT here: it lives in the provider package's own slot, which is
+# the package that reads it. This one cannot name that one, which is the whole point.
+[[credentials]]
+key   = "connection-secrets"
+label = "Cloud connection secrets"
+
+# The shared object-storage logic. Optional on purpose: every call through it has a local
+# fallback, so the panel browses and transfers without it — what it cannot do alone is plan a
+# sync, and it says so rather than guessing. Declared so the Marketplace offers the pair.
+[[dependencies]]
+name     = "cloud-toolkit"
+version  = ">=1.0.0"
+optional = true
+
 [hooks]
 "arbor:plugin_load" = true
 "arbor:repo_open"   = false   # Cloud connections are global, not per-repo.

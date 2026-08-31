@@ -1,0 +1,223 @@
+-- provider.lua — talking to a store, through the extension that implements it.
+--
+-- Every call in this file goes to a WASI provider package (`cloud-gcs`, and its siblings) via
+-- `arbor.ext.call`. Arbor is not in the middle of any of it: it checks that this plugin may
+-- call an extension, resolves the address, and passes JSON through. What a bucket is, and
+-- what "list" means, lives entirely between this file and the provider.
+--
+-- ## The two shapes
+--
+-- Ordinary calls answer in JSON, which is right for a listing and wrong for an object. When
+-- the payload IS the answer, `read_to_file` / `write_from_file` move the bytes straight
+-- between the provider and a local file — never through Lua, and never as a JSON array of
+-- numbers. That is the difference between a download that works and one that holds six copies
+-- of a gigabyte.
+--
+-- ## Targets
+--
+-- Every provider function takes `{ bucket = …, config = … }` as its first argument, where
+-- `config` is the provider's OWN json — this file does not interpret it, and neither does
+-- Arbor. Credentials are not in it: the provider reads them from its own credential slot.
+
+local state = require("state")
+
+local M = {}
+
+local INTERFACE = "cloud-provider"
+
+-- ── Addressing ──────────────────────────────────────────────────────────────
+
+--- The `[[provides]]` id of the package that serves this connection's kind.
+local function provider_id(conn)
+  return conn.provider or "gcs"
+end
+
+--- The `target` record every provider function opens with.
+--
+-- Only what the provider needs to reach the bucket. `state.envelope` has more in it — the
+-- connection's name, its display settings — and sending those would be inviting a provider to
+-- depend on this plugin's own storage shape.
+function M.target(conn, bucket)
+  local cfg = {
+    project_id = conn.project_id,
+    endpoint   = conn.endpoint,
+    region     = conn.region,
+  }
+  return {
+    bucket = bucket or conn.default_bucket or "",
+    config = arbor.json.encode(cfg),
+  }
+end
+
+--- Call one provider method. Returns `(value, nil)` or `(nil, err)`.
+--
+-- `pcall` because `arbor.ext.call` RAISES on failure — the extension is not installed, the
+-- token is refused, the store said no — while every caller in this plugin is written against
+-- the `(value, err)` pair the rest of the API uses. Converting once here is what keeps the
+-- call sites from each growing their own pcall.
+function M.call(conn, bucket, method, args)
+  local all = { M.target(conn, bucket) }
+  for _, a in ipairs(args or {}) do all[#all + 1] = a end
+
+  local ok, result = pcall(function()
+    return arbor.ext.call{
+      interface = INTERFACE,
+      id        = provider_id(conn),
+      method    = method,
+      args      = all,
+    }
+  end)
+  if not ok then return nil, tostring(result) end
+  return result, nil
+end
+
+-- ── The whole-answer operations ─────────────────────────────────────────────
+
+function M.test(conn, bucket)
+  return M.call(conn, bucket, "test", {})
+end
+
+--- One page. `cursor` is the store's own continuation token; `nil` starts at the beginning.
+--
+-- `delimiter = "/"` gives the folder-shaped view; passing `nil` walks everything under the
+-- prefix, which is what a recursive search does.
+function M.list(conn, bucket, prefix, opts)
+  opts = opts or {}
+  return M.call(conn, bucket, "list", {
+    prefix or "",
+    opts.delimiter,
+    opts.cursor,
+    opts.limit,
+  })
+end
+
+--- Every page under a prefix, walked. `on_page(entries, done)` is called per page, so a
+--- caller can render as it goes instead of waiting for a bucket with 40 000 objects.
+--
+-- `hard_cap` stops a walk that would never end — a prefix matching a million keys is a
+-- mistake, not a request, and the caller is told it was truncated rather than left to wonder.
+function M.list_all(conn, bucket, prefix, opts)
+  opts = opts or {}
+  local cap       = opts.hard_cap or 10000
+  local delimiter = opts.delimiter
+  local out, cursor, truncated = {}, nil, false
+
+  repeat
+    local page, err = M.list(conn, bucket, prefix, {
+      delimiter = delimiter,
+      cursor    = cursor,
+      limit     = opts.page_size or 1000,
+    })
+    if err then return nil, err end
+
+    for _, entry in ipairs(page.entries or {}) do
+      out[#out + 1] = entry
+      if #out >= cap then truncated = true break end
+    end
+    if opts.on_page then opts.on_page(page.entries or {}, page.cursor == nil) end
+    if opts.cancelled and opts.cancelled() then break end
+
+    cursor = page.cursor
+  until cursor == nil or truncated
+
+  return { entries = out, truncated = truncated }, nil
+end
+
+function M.stat(conn, bucket, key)
+  return M.call(conn, bucket, "stat", { key })
+end
+
+function M.delete(conn, bucket, key)
+  return M.call(conn, bucket, "delete", { key })
+end
+
+function M.copy(conn, bucket, source, destination)
+  return M.call(conn, bucket, "copy", { source, destination })
+end
+
+-- ── The payload operations ──────────────────────────────────────────────────
+
+--- Read one range of an object straight into a local file. Returns bytes written.
+--
+-- `append` is what makes a chunked download possible: the first range replaces the file, every
+-- one after it adds to the end. The bytes go from the provider to the file — this function
+-- never sees them.
+function M.read_to_file(conn, bucket, key, path, range, append)
+  local ok, written = pcall(function()
+    return arbor.ext.call_to_file{
+      interface = INTERFACE,
+      id        = provider_id(conn),
+      method    = "read",
+      args      = { M.target(conn, bucket), key, range },
+      path      = path,
+      append    = append and true or false,
+    }
+  end)
+  if not ok then return nil, tostring(written) end
+  return written, nil
+end
+
+--- Write a slice of a local file as an object.
+--
+-- `file_arg = 3` is the `body` parameter of the provider's `write` — the target is 1 and the
+-- key is 2. The `false` in its place is a placeholder the host ignores; `nil` cannot be used
+-- because it would end the argument list.
+function M.write_from_file(conn, bucket, key, path, opts)
+  opts = opts or {}
+  local ok, result = pcall(function()
+    return arbor.ext.call_from_file{
+      interface = INTERFACE,
+      id        = provider_id(conn),
+      method    = "write",
+      args      = { M.target(conn, bucket), key, false, opts.content_type },
+      file_arg  = 3,
+      path      = path,
+      offset    = opts.offset or 0,
+      length    = opts.length or 0,
+    }
+  end)
+  if not ok then return nil, tostring(result) end
+  return result, nil
+end
+
+--- Ask the provider package to make this connection's credentials usable.
+--
+-- Fire-and-forget on purpose. Every provider exports `ensure`, and what it does — renew a
+-- token, adopt a credentials file, nothing at all — is its business; the panel only says when
+-- it would be a good moment. Asynchronous because `arbor.service.call` is, and because the
+-- alternative would be blocking the browse on a network call that is usually unnecessary.
+--
+-- A failure surfaces as a notification rather than as a silent no-op: "the sign-in expired"
+-- is the one thing the user has to be told before the next operation fails.
+function M.ensure(conn)
+  if not conn or not M.available(conn) then return end
+  local service = "cloud-" .. provider_id(conn) .. ".ensure"
+  arbor.service.call(service, { method = (conn.gcs and conn.gcs.method) or "oauth" },
+    function(ok, res)
+      if ok and res and res.ok then return end
+      local msg = (res and res.error) or "the provider could not authenticate"
+      arbor.notify{ title = "Cloud sign-in", message = tostring(msg), level = "warning" }
+    end)
+end
+
+--- Whether a provider for this connection's kind is installed at all.
+--
+-- Asked before an operation rather than discovered as a failure three calls in: "install the
+-- GCS package" is a different sentence from "the store refused", and a user who sees the
+-- second when the first is true goes looking at their credentials.
+function M.available(conn)
+  local id = provider_id(conn)
+  for _, e in ipairs(arbor.ext.list() or {}) do
+    if e.interface == INTERFACE and e.id == id then return true end
+  end
+  return false
+end
+
+--- The message to show when it is not.
+function M.missing_message(conn)
+  local id = provider_id(conn)
+  return "No provider package for '" .. id .. "' is installed and enabled. "
+      .. "Install it from the Marketplace — the panel cannot reach a store without one."
+end
+
+return M

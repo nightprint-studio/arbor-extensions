@@ -9,6 +9,8 @@
 
 local state    = require("state")
 local cf       = require("ui.config_form")
+local provider = require("provider")
+local secrets  = require("secrets")
 
 local M = {}
 
@@ -533,12 +535,14 @@ function M.on_test(ctx)
   local rec = find_working(M._active)
   if not rec then return end
   patch_from_ctx(rec, ctx)
-  local env = state.envelope(rec)
   arbor.notify{ title = "Testing connection…", message = rec.name or rec.id or "", level = "info" }
-  arbor.cloud.test_connection_async({
-    conn       = env,
-    bucket     = rec.default_bucket or "",
-    on_done    = "cloud:test_connection_modal_done",
+  -- One call to the provider package, and it blocks this VM while the store answers — a
+  -- zero-length listing, so the wait is a round trip. The reply is emitted under the same
+  -- event the old asynchronous flow used, so the handler that shows it is unchanged.
+  local _, err = provider.test(rec, rec.default_bucket or "")
+  arbor.events.emit("cloud:test_connection_modal_done", {
+    ok         = err == nil,
+    error      = err,
     request_id = tostring(rec.id or "modal"),
   })
 end
@@ -562,20 +566,21 @@ function M.on_oauth(ctx)
     rec.id = new_id
     M._active = new_id
   end
-  rec.gcs.secret_ref = "gcs/" .. rec.id .. "/oauth"
-  rec.gcs.client_id  = ctx.oauth_client_id or rec.gcs.client_id or ""
+  -- No secret_ref for OAuth any more: the token lives in the PROVIDER package's own
+  -- credential slot, because that is the package that reads it — and a package can only name
+  -- its own slots. The client id lives in that package's settings for the same reason.
+  rec.gcs.secret_ref = nil
 
-  local _, err = arbor.cloud.oauth_start({
-    secret_ref    = rec.gcs.secret_ref,
-    client_id     = rec.gcs.client_id,
-    client_secret = ctx.oauth_client_secret or "",
-  })
-  if err then
-    arbor.notify{ title = "Authorize failed", message = tostring(err), level = "error" }
-  else
-    arbor.notify{ title = "Authorize with Google",
+  local service = "cloud-" .. (rec.provider or "gcs")
+  arbor.service.call(service .. ".connect", {}, function(ok, res)
+    if not ok or not (res and res.ok) then
+      local msg = (res and res.error) or ("install and configure the " .. service .. " package")
+      arbor.notify{ title = "Authorize failed", message = tostring(msg), level = "error" }
+      return
+    end
+    arbor.notify{ title = "Authorize",
       message = "A browser window opened. Approve and come back.", level = "info" }
-  end
+  end)
 end
 
 -- Commit: persist M._working to settings, wipe keyring entries for removed
@@ -615,14 +620,26 @@ function M.on_save(ctx)
         M._active = new_id
       end
       local function push(ref_key, value)
-        local _, err = arbor.cloud.secret_set(ref_key, value)
-        if err then arbor.log.warn("save secret " .. ref_key .. ": " .. tostring(err)) end
+        -- This package's own slot, keyed by connection. It holds what the PANEL was given —
+        -- a service-account file's contents, an access key — never a provider's OAuth token,
+        -- which the provider stores itself.
+        secrets.set(ref_key, value)
       end
       if rec.provider == "gcs"
          and (rec.gcs and rec.gcs.method) == "sa_inline"
          and ctx.sa_json and ctx.sa_json ~= "" then
-        rec.gcs.secret_ref = "gcs/" .. rec.id
-        push(rec.gcs.secret_ref, ctx.sa_json)
+        -- To the provider package, not into ours: it is the one that signs with it.
+        rec.gcs.secret_ref = nil
+        arbor.service.call("cloud-" .. (rec.provider or "gcs") .. ".set-service-account",
+          { json = ctx.sa_json },
+          function(ok, res)
+            if ok and res and res.ok then return end
+            arbor.notify{
+              title   = "Service account",
+              message = tostring((res and res.error) or "the provider would not take the key"),
+              level   = "error",
+            }
+          end)
       elseif rec.provider == "s3" and ctx.s3_secret_key and ctx.s3_secret_key ~= "" then
         rec.s3 = rec.s3 or {}
         rec.s3.secret_ref = "s3/" .. rec.id
