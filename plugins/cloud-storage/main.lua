@@ -89,22 +89,23 @@ local function register_context_menu()
     when = { kind = "object", multi = true },
   })
 
-  -- Chunk-merge entries are visible only when at least one chunk-handler
-  -- plugin is currently contributing.
-  if #chunks.list_handlers() > 0 then
-    arbor.ui.contribute("cloud-storage:cloud:context_menu", {
-      id = "ctx-multi-chunks-auto",
-      payload = { label = "Download chunks (auto-order by date)",
-                  action = "cloud:multi_dl_chunks_auto", icon = "Combine" },
-      when = { kind = "object", multi = true },
-    })
-    arbor.ui.contribute("cloud-storage:cloud:context_menu", {
-      id = "ctx-multi-chunks-custom",
-      payload = { label = "Download chunks (custom order…)",
-                  action = "cloud:multi_dl_chunks_custom", icon = "ListOrdered" },
-      when = { kind = "object", multi = true },
-    })
-  end
+  -- Always registered. These used to appear only when a chunk-handler plugin was
+  -- contributing, from when the merge WAS the handler's job; now the download writes the
+  -- parts straight into the output and a handler is the exception, so gating on one hid the
+  -- feature from everybody the moment the last handler retired. It also made the menu depend
+  -- on plugin load order, which nothing guarantees.
+  arbor.ui.contribute("cloud-storage:cloud:context_menu", {
+    id = "ctx-multi-chunks-auto",
+    payload = { label = "Download chunks (auto-order by date)",
+                action = "cloud:multi_dl_chunks_auto", icon = "Combine" },
+    when = { kind = "object", multi = true },
+  })
+  arbor.ui.contribute("cloud-storage:cloud:context_menu", {
+    id = "ctx-multi-chunks-custom",
+    payload = { label = "Download chunks (custom order…)",
+                action = "cloud:multi_dl_chunks_custom", icon = "ListOrdered" },
+    when = { kind = "object", multi = true },
+  })
 
   arbor.ui.contribute("cloud-storage:cloud:context_menu", {
     id = "ctx-multi-sep",

@@ -189,29 +189,11 @@ function M.multi_dl_chunks(ctx, mode)
     return
   end
 
-  local handlers = M.list_handlers()
-  if #handlers == 0 then
-    arbor.notify{
-      title = "No chunk handler",
-      message = "Install a chunk-merger plugin to download and merge multi-part files.",
-      level = "warning",
-    }
-    return
-  end
-
-  -- Fail fast if the `arbor.service.call` API isn't available. cloud-storage
-  -- declares `service_call = true` in plugin.toml, so this only trips when
-  -- someone has stripped the permission — and the symptom (a card stuck on
-  -- "Concatenating chunks…" with no :err callback) is awful to diagnose.
-  if type(arbor.service) ~= "table" or type(arbor.service.call) ~= "function" then
-    arbor.notify{
-      title   = "Cloud Storage misconfigured",
-      message = "arbor.service.call is unavailable — add `service_call = true` to "
-             .. "cloud-storage's plugin.toml [permissions] section.",
-      level   = "error",
-    }
-    return
-  end
+  -- No handler check here, and no `arbor.service.call` check either. Both were preconditions
+  -- of the old shape, where the parts landed in a temp folder and something else joined them.
+  -- The download IS the concatenation now, so zero handlers is the ordinary case; the handler
+  -- branch in `_kick_off_download` is the one that needs `arbor.service.call`, and it tests
+  -- for it there, where a failure can still be told apart from "nothing to merge".
 
   local conn, _config_id, bucket = ctx_connection(ctx)
   if not conn then return end
@@ -266,11 +248,15 @@ arbor.events.on("cloud:multi_chunks_target_picked", function(ctx)
     return
   end
 
-  -- Resolve the handler (radio prompt if >1 installed).
+  -- Resolve the handler: none (the common case — concatenate on the way down), the only one
+  -- installed, or a radio prompt when several are. Without the zero case this fell through to
+  -- the prompt below and asked the user to choose from an empty list.
   local handlers = M.list_handlers()
-  if #handlers == 1 then
+  if #handlers <= 1 then
     M._pending_setup = {
       conn = conn, bucket = ctx.bucket, mode = ctx.mode, nodes = ctx.nodes,
+      -- nil when none is installed, which `_kick_off_download` reads as "concatenate on the
+      -- way down". One and none take the same path because neither has anything to ask.
       output = output, handler = handlers[1],
     }
     M._after_handler_resolved()

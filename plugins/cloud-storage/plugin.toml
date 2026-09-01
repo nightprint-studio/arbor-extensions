@@ -1,5 +1,5 @@
 name        = "cloud-storage"
-version     = "1.0.0"
+version     = "1.0.1"
 description = "Object storage in Arbor — browse, upload, download and sync buckets. The panel and the connection settings; the backends that talk to each store ship as their own packages."
 author      = "Nightprint Studio"
 repository  = "https://github.com/nightprint-studio/arbor-extensions"
@@ -25,11 +25,11 @@ fs_scope = ["*"]
 # and they hold the permission for the hosts they actually reach. A UI package with a network
 # allowlist would be a UI package that could be made to fetch.
 
-# Required for chunk-merger contributions: chunks.lua calls
-# `arbor.service.call("<handler-plugin>.merge", …)` after a multi-chunk download to drive the
-# merge phase. Without it `arbor.service.call` is nil and the merge handler invocation raises
-# silently inside the `download-many-done` hook — leaving the operations card stuck on
-# "Concatenating chunks…" forever.
+# For a chunk-merger handler, when one is installed: `chunks.lua` calls
+# `arbor.service.call("<handler-plugin>.merge", …)` for the merges that are NOT plain
+# concatenations. The ordinary chunked download needs none of this — it appends each part to
+# the output as it arrives — so this permission is what a handler needs, not what the feature
+# needs.
 service_call = true
 
 # The panel's own secrets — a service-account file's contents, an access key — as one JSON

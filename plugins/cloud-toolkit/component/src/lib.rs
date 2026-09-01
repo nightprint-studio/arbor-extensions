@@ -16,7 +16,7 @@ wit_bindgen::generate!({
     world: "toolkit",
 });
 
-use exports::arbor::cloud_toolkit::util::{
+use exports::arbor::cloud_toolkit::cloud_util::{
     ByteRange, Chunk, ChunkOrder, Guest, LocalEntry, Overwrite, RemoteEntry, SyncAction,
     SyncPlanResult, SyncPolicy,
 };

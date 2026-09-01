@@ -59,8 +59,9 @@ The maturity tag travels with the plugin (it's declared in `plugin.toml`), so it
 | **run-monitor** | Dashboard for long-running services started by `run-action` | Stable |
 | **deps-explorer** | Surfaces project dependencies and flags outdated or vulnerable ones | Stable |
 | **cloud-storage** | Browse and upload/download to cloud object stores. Tested with Google Cloud Storage | Stable |
-| **chunk-merger-bin** | Helper for `cloud-storage`: reassembles chunked downloads | Stable |
+| **cloud-toolkit** | Shared object-storage logic — keys, globs, transfer and sync planning. A `cloud-util` extension: no Lua, no permissions, it only computes | Beta |
 | **cloud-gcs** | Google Cloud Storage backend for `cloud-storage`. A wasm extension — no Lua, no UI | Beta |
+| **chunk-merger-bin** | Retired. Chunked downloads concatenate as they go, so no merge handler is needed — uninstall it | Retired |
 | **bevy-runtime** | A 3D viewport any plugin can open, driven by RON scene documents. Ships the engine once | Beta |
 | **shader-preview** | Look at a WGSL material while you edit it — real Bevy lighting, parameters on sliders | Beta |
 | **shader-preview-meshes** | Sphere, cube, plane, torus. A `mesh-source` extension, and the seam your own geometry plugs into | Beta |

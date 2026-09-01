@@ -24,7 +24,7 @@ package arbor:cloud-toolkit@1.0.0;
 //
 // No network, no filesystem, no clock. Which is why the package declares no permissions at
 // all: a component that only computes has nothing to be tricked into.
-interface util {
+interface cloud-util {
   /// A half-open byte range: `start` included, `end` excluded — the same convention the
   /// provider interface uses, so a range crosses between them unconverted.
   record byte-range {
@@ -139,5 +139,5 @@ interface util {
 }
 
 world toolkit {
-  export util;
+  export cloud-util;
 }
