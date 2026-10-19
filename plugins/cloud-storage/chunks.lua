@@ -198,9 +198,9 @@ function M.multi_dl_chunks(ctx, mode)
   local conn, _config_id, bucket = ctx_connection(ctx)
   if not conn then return end
 
-  -- The host already supplies last_modified on each CloudObject's data; the
-  -- tree rows carry that through.  For the "auto" mode we just sort here;
-  -- for "custom" we hand off to the drag-reorder modal.
+  -- The listing already carried each object's `modified`, and the sidebar put it on the row,
+  -- so ordering the parts costs nothing here. "auto" sorts and goes; "custom" hands the same
+  -- order to the reorder modal first.
   local nodes = nodes_of_kind(ctx, "object")
   if #nodes < 2 then
     arbor.notify{ title = "Chunks", message = "Select at least two parts.",
@@ -317,9 +317,22 @@ function M._after_handler_resolved()
   local setup = M._pending_setup
   if not setup then return end
   if setup.mode == "custom" then
-    -- Open the drag-reorder picker first. Default order: by last_modified.
+    -- Open the reorder picker, starting from the order "auto" would have used — upload time
+    -- ascending. Same helper, so the two modes cannot drift: the custom one is the automatic
+    -- one with a chance to intervene, and a different starting order would make the picker
+    -- lie about what "just confirm" does.
+    local by_date = {}
+    for i, path in ipairs(M._sorted_paths_by_date(setup.nodes)) do by_date[path] = i end
+    local ordered = {}
+    for _, n in ipairs(setup.nodes) do ordered[#ordered + 1] = n end
+    table.sort(ordered, function(a, b)
+      local pa = (a.data and a.data.path) or ""
+      local pb = (b.data and b.data.path) or ""
+      return (by_date[pa] or math.huge) < (by_date[pb] or math.huge)
+    end)
+
     local items = {}
-    for _, n in ipairs(setup.nodes) do
+    for _, n in ipairs(ordered) do
       local d = n.data or {}
       items[#items + 1] = {
         label = (n.label or d.path),
@@ -328,8 +341,6 @@ function M._after_handler_resolved()
         meta  = nil,  -- modified-date display deferred to v2
       }
     end
-    -- Sort by last_modified asc (same as auto) as a sane starting point.
-    table.sort(items, function(a, b) return (a.path or "") < (b.path or "") end)
 
     -- A form the plugin owns, not a modal the host carries: `reorder_list` is a form node
     -- like any other, and the order it answers with is the sequence the concatenation uses.
@@ -364,15 +375,18 @@ function M._after_handler_resolved()
 end
 
 function M._sorted_paths_by_date(nodes)
-  -- Each tree-node `data` carries `last_modified` (ISO string) from the
-  -- backend listing.  Sort ascending; tie-break alphabetic on path so the
-  -- order stays stable when timestamps match (split-archive uploads often
-  -- finish within the same second).
+  -- Each tree-node `data` carries `modified` — unix seconds, as the provider interface
+  -- reports it. Sort ascending; tie-break alphabetic on path so the order stays stable when
+  -- timestamps match, which split-archive uploads routinely do: the parts finish within the
+  -- same second and a store's resolution IS the second.
+  --
+  -- `or 0` rather than `or ""`: a comparison between a number and a string raises in Lua, so
+  -- one object without a timestamp among many with one would abort the whole merge.
   local copy = {}
   for _, n in ipairs(nodes) do copy[#copy + 1] = n end
   table.sort(copy, function(a, b)
-    local da = (a.data and a.data.last_modified) or ""
-    local db = (b.data and b.data.last_modified) or ""
+    local da = (a.data and a.data.modified) or 0
+    local db = (b.data and b.data.modified) or 0
     if da == db then
       return ((a.data and a.data.path) or "") < ((b.data and b.data.path) or "")
     end

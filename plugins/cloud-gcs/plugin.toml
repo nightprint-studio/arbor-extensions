@@ -1,5 +1,5 @@
 name        = "cloud-gcs"
-version     = "1.0.0"
+version     = "1.0.2"
 description = "Google Cloud Storage buckets for Arbor's cloud panel."
 author      = "Nightprint Studio"
 repository  = "https://github.com/nightprint-studio/arbor-extensions"
@@ -65,3 +65,11 @@ module    = "cloud_gcs.wasm"
 
 [wasm]
 target = "wasm32-wasip2"
+
+# The load hook, and only it. Everything this package does for the panel — `connect`,
+# `ensure`, `status` — is a service it exports from `main.lua`, and a service that is never
+# exported is a call the panel cannot make: without this line the sign-in simply does not
+# exist. Nothing else is subscribed, because a provider has no opinion about commits or
+# branches.
+[hooks]
+"arbor:plugin_load" = true

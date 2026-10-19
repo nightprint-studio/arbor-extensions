@@ -416,11 +416,13 @@ local function replace_form()
   end
 end
 
-function M.open()
+--- `conn_id` opens straight onto one connection — what a "fix this connection" affordance
+--- elsewhere in the panel needs, so the user does not land on the list and have to find the
+--- row they just clicked about.
+function M.open(conn_id)
   load_working()
-  -- Pick the currently-selected connection as the initial active row,
-  -- otherwise the first connection (if any), otherwise nothing.
-  M._active = state.selected_id() or ""
+  -- Pick the requested row, else the currently-selected connection, else the first one.
+  M._active = conn_id or state.selected_id() or ""
   if M._active == "" or not find_working(M._active) then
     M._active = (M._working[1] and M._working[1].id) or nil
   end
@@ -527,24 +529,12 @@ end
 -- Test the currently-active connection in place (no save).  Reads pending
 -- edits from ctx so the user can verify a change before persisting.
 --
--- Fires the test asynchronously: blocking the plugin-host thread for the
--- full network round-trip made the rest of arbor appear to freeze.  The
--- result lands on `cloud:test_connection_modal_done` (registered in
--- main.lua) which surfaces the same success / failure notifications.
+-- The provider notifies the verdict itself (see `provider.test_and_notify`).
 function M.on_test(ctx)
   local rec = find_working(M._active)
   if not rec then return end
   patch_from_ctx(rec, ctx)
-  arbor.notify{ title = "Testing connection…", message = rec.name or rec.id or "", level = "info" }
-  -- One call to the provider package, and it blocks this VM while the store answers — a
-  -- zero-length listing, so the wait is a round trip. The reply is emitted under the same
-  -- event the old asynchronous flow used, so the handler that shows it is unchanged.
-  local _, err = provider.test(rec, rec.default_bucket or "")
-  arbor.events.emit("cloud:test_connection_modal_done", {
-    ok         = err == nil,
-    error      = err,
-    request_id = tostring(rec.id or "modal"),
-  })
+  provider.test_and_notify(rec, rec.default_bucket or "")
 end
 
 -- Kick off OAuth for the active connection.  We persist the draft first so
@@ -572,7 +562,13 @@ function M.on_oauth(ctx)
   rec.gcs.secret_ref = nil
 
   local service = "cloud-" .. (rec.provider or "gcs")
-  arbor.service.call(service .. ".connect", {}, function(ok, res)
+  -- The client the user just typed goes WITH the request. `patch_from_ctx` deliberately keeps
+  -- the secret out of the working record — it belongs to the provider package's settings, not
+  -- to a connection — so it is read from the form context here, once, on its way there.
+  arbor.service.call(service .. ".connect", {
+    client_id     = rec.gcs.client_id or "",
+    client_secret = (ctx and ctx.oauth_client_secret) or "",
+  }, function(ok, res)
     if not ok or not (res and res.ok) then
       local msg = (res and res.error) or ("install and configure the " .. service .. " package")
       arbor.notify{ title = "Authorize failed", message = tostring(msg), level = "error" }

@@ -36,11 +36,32 @@ local SLOT          = "oauth"
 -- ── Signing in ──────────────────────────────────────────────────────────────
 
 --- Start the flow. Returns the URL the caller should open.
-local function connect()
-  local client_id, client_secret = settings.client()
+---
+--- `args.client_id` / `args.client_secret` are the client the CALLER holds. The panel asks
+--- for one in its connection form, and a client typed there that never reached the flow would
+--- be a field that does nothing while the sign-in fails for want of exactly it. Given one, it
+--- is also stored: a refresh months later has to find the same client, and this package's
+--- settings are where it lives.
+local function connect(args)
+  args = args or {}
+  local stored_id, stored_secret = settings.client()
+
+  local client_id = (args.client_id or "") ~= "" and args.client_id or stored_id
+  -- A blank secret field means "unchanged", not "cleared": the form never shows a stored
+  -- secret back, so reading blank as a clear would quietly strip a client that has one.
+  local client_secret =
+    (args.client_secret or "") ~= "" and args.client_secret or stored_secret
+
+  if client_id ~= stored_id or client_secret ~= stored_secret then
+    settings.set_client(client_id, client_secret)
+    settings.contribute_sections()
+  end
+
   if client_id == "" then
-    return nil, "Set a Google OAuth client id in this package's settings first. "
-             .. "Register a Desktop client at https://console.cloud.google.com/apis/credentials."
+    return nil, "No Google OAuth client id. Fill one in on the connection, or in this "
+             .. "package's settings. Register a Desktop client at "
+             .. "https://console.cloud.google.com/apis/credentials with "
+             .. "http://127.0.0.1:7732/ as its redirect URI."
   end
 
   local ok, url = pcall(function()
@@ -88,8 +109,8 @@ arbor.events.on("arbor:plugin_load", function()
   -- `arbor.oauth.start` opens the browser itself and hands the URL back, so a caller that
   -- wants to show it ("didn't open? use this link") has it. A package cannot open a URL on
   -- its own, and giving it a way to would be a way to open any URL.
-  arbor.service.export("connect", function()
-    local url, err = connect()
+  arbor.service.export("connect", function(args)
+    local url, err = connect(args)
     if err then return { ok = false, error = err } end
     return { ok = true, auth_url = url }
   end)
@@ -104,7 +125,7 @@ arbor.events.on("arbor:plugin_load", function()
   -- authenticates by, make it usable now". Every provider package is expected to export it,
   -- so the panel can prepare a connection without knowing what preparing means.
   arbor.service.export("ensure", function(args)
-    local ok, err = auth.ensure(args and args.method)
+    local ok, err = auth.ensure(args and args.method, args and args.key_json)
     if not ok then return { ok = false, error = err } end
     return { ok = true }
   end)

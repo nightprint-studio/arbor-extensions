@@ -50,12 +50,17 @@ end
 --- The signing happens inside the wasm component — Lua has no RSA, and the key never leaves
 --- the slot for anywhere but there. What comes back is stored in the token slot, which is
 --- where the very same component reads its bearer from on the next request.
-local function mint_from_key()
-  local key = nil
-  local ok = pcall(function() key = arbor.credentials.get(KEY_SLOT) end)
-  if not ok or not key or key == "" then
-    return false, "no service-account key is stored for this package. Paste one in the "
-               .. "connection form, or sign in with a Google account instead."
+---
+--- `key` is the key's text when the caller already holds it — a connection that points at a key
+--- FILE hands the contents over for the length of one call and nothing is stored. Without it the
+--- key is read from the slot, which is where a key the user pasted into the form lives.
+local function mint_from_key(key)
+  if not key then
+    local ok = pcall(function() key = arbor.credentials.get(KEY_SLOT) end)
+    if not ok or not key or key == "" then
+      return false, "no service-account key is stored for this package. Paste one in the "
+                 .. "connection form, or sign in with a Google account instead."
+    end
   end
 
   local called, result = pcall(function()
@@ -74,8 +79,11 @@ local function mint_from_key()
     access_token  = result.access_token or result["access-token"],
     expires_at    = os.time() + math.max(0, (result.expires_in or result["expires-in"] or 3600) - 30),
   }
-  local saved = pcall(function() arbor.credentials.set(SLOT, arbor.json.encode(tokens)) end)
-  if not saved then return false, "could not store the minted token" end
+  local saved, serr = pcall(function() arbor.credentials.set(SLOT, arbor.json.encode(tokens)) end)
+  if not saved then
+    local reason = tostring(serr):gsub("%s*stack traceback:.*$", ""):gsub("^runtime error:%s*", "")
+    return false, "could not store the minted token: " .. reason
+  end
   return true, nil
 end
 
@@ -88,8 +96,14 @@ function M.set_key(json)
   if not parsed_ok or type(parsed) ~= "table" or not parsed.private_key then
     return false, "that does not look like a service-account key file (no private_key)"
   end
-  local ok = pcall(function() arbor.credentials.set(KEY_SLOT, json) end)
-  if not ok then return false, "could not store the key" end
+  -- The host's own reason, not just the fact: a slot the manifest never declared, a credential
+  -- store that refused the write and an unreadable vault are three different things to fix, and
+  -- "could not store the key" named none of them.
+  local ok, err = pcall(function() arbor.credentials.set(KEY_SLOT, json) end)
+  if not ok then
+    local reason = tostring(err):gsub("%s*stack traceback:.*$", ""):gsub("^runtime error:%s*", "")
+    return false, "could not store the key: " .. reason
+  end
   -- Mint immediately: the user has just pasted a key and is entitled to find out now whether
   -- it works, rather than at the first listing.
   return mint_from_key()
@@ -162,14 +176,23 @@ end
 ---
 --- Returns `(true, nil)` when there is one, `(false, err)` when the user has to do something.
 --- Safe to call often: the refresh is a no-op while the stored token has life left.
-function M.ensure(method)
+function M.ensure(method, key_json)
   method = method or "oauth"
 
   if method == "oauth" then
     local ok, res = pcall(function()
       return arbor.oauth.refresh{ slot = SLOT, token_url = TOKEN_URL, min_remaining_secs = 300 }
     end)
-    if not ok then return false, tostring(res) end
+    if not ok then
+      -- An empty slot is not a failure of the refresh, it is "nobody has signed in yet" —
+      -- and "the 'oauth' slot is empty" is a sentence about Arbor's internals that tells the
+      -- user nothing about what to press.
+      local msg = tostring(res)
+      if msg:find("slot is empty", 1, true) then
+        return false, "not signed in to Google yet. Use Authorize in the connection settings."
+      end
+      return false, msg
+    end
     return true, nil
   end
 
@@ -202,6 +225,18 @@ function M.ensure(method)
     -- A minted token has no refresh token to renew it: minting again IS the renewal, so the
     -- check is "is the one we have still good?" and the answer to no is another exchange.
     if token_remaining() > 300 then return true, nil end
+    -- A key FILE arrives as text for this one call (`key_json`) and is never stored; only the
+    -- token it buys is. A pasted key (`sa_inline`) is read from its slot.
+    if method == "sa_file" then
+      if type(key_json) ~= "string" or key_json == "" then
+        return false, "no service-account key file was given for this connection."
+      end
+      local parsed_ok, parsed = pcall(arbor.json.decode, key_json)
+      if not parsed_ok or type(parsed) ~= "table" or not parsed.private_key then
+        return false, "that file is not a service-account key (no private_key)."
+      end
+      return mint_from_key(key_json)
+    end
     return mint_from_key()
   end
 

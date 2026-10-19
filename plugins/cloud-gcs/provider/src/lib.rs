@@ -113,15 +113,44 @@ fn call(
 /// half — which is where the OAuth flow lives — and a component holding a stale copy would
 /// keep failing with 401 long after the user fixed it. The read is a host call, not a
 /// network round trip.
+///
+/// ## The slot holds a document, not a token
+///
+/// `arbor.oauth` writes `{ access_token, refresh_token, expires_at, client_id, … }` into the
+/// slot, because the same slot has to carry what the *next* refresh needs. The bearer is one
+/// field of it. Sending the document itself produces a 401 that reads exactly like a revoked
+/// grant, which sends the user to re-authorise a credential that was fine.
+///
+/// A slot holding a bare token still works: a credential that IS the string should not have
+/// to be wrapped in JSON to be readable here.
 fn token() -> Result<String, Error> {
-    match arbor::extensions::secrets::get(TOKEN_KEY) {
-        Ok(Some(t)) if !t.is_empty() => Ok(t),
-        Ok(_) => Err(Error::Auth(
-            "no Google access token stored. Connect an account from the cloud panel's \
-             connection settings."
+    let raw = match arbor::extensions::secrets::get(TOKEN_KEY) {
+        Ok(Some(t)) if !t.trim().is_empty() => t,
+        Ok(_) => {
+            return Err(Error::Auth(
+                "no Google access token stored. Connect an account from the cloud panel's \
+                 connection settings."
+                    .into(),
+            ));
+        }
+        Err(e) => return Err(Error::Auth(format!("{e:?}"))),
+    };
+
+    let doc: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        // Not JSON at all: the slot is a plain bearer, and that is a legitimate shape.
+        Err(_) => return Ok(raw),
+    };
+    match doc.get("access_token").and_then(|v| v.as_str()) {
+        Some(t) if !t.is_empty() => Ok(t.to_string()),
+        // The document exists but has no access token yet — an adopted ADC grant before its
+        // first refresh looks exactly like this. Saying so beats "no token stored", which
+        // would send the user to sign in again when a refresh is all that is missing.
+        _ => Err(Error::Auth(
+            "the stored Google credential has no access token yet. Reopen the cloud panel's \
+             connection settings and authorize again."
                 .into(),
         )),
-        Err(e) => Err(Error::Auth(format!("{e:?}"))),
     }
 }
 

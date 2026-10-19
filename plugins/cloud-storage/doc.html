@@ -33,7 +33,7 @@
   <tr>
     <td><strong>Service account file</strong></td>
     <td>Most common for CI / server roles. Download the JSON key from the GCP console once.</td>
-    <td>Just the path to the file. The key itself stays on disk.</td>
+    <td>Just the path to the file, in plain. The key itself stays on disk: it is read when a token is needed, handed to the provider for that one call and never stored — only the access token it buys (an hour) is kept.</td>
   </tr>
   <tr>
     <td><strong>Service account inline</strong></td>
@@ -53,11 +53,11 @@
   <tr>
     <td><strong>OAuth user</strong></td>
     <td>End-user accounts where you can't issue a service account. Register a Desktop OAuth client in GCP.</td>
-    <td>Refresh token JSON in the keychain (<code>cloud-storage / gcs/&lt;config-id&gt;/oauth</code>). Access tokens are refreshed automatically.</td>
+    <td>Refresh token in the keychain, in the <em>provider</em> package's own slot (<code>cloud-gcs / oauth</code>) — a package can only name its own, and the one that reads the token is the one that signs in. Access tokens are refreshed automatically.</td>
   </tr>
 </table>
 
-<p>Use <strong>Test connection</strong> at the bottom of the form to validate auth and bucket reachability before saving — the report names the auth method and (when known) the service-account email or user identity behind the token.</p>
+<p>Use <strong>Test connection</strong> at the bottom of the form to validate auth and bucket reachability before saving. It signs in first and then reaches the bucket, and answers with a notification either way: <em>Connection OK</em>, or <em>Connection failed</em> with the reason — a key file that cannot be read, an account that is not signed in yet, the store's own refusal.</p>
 
 <h3>Browsing</h3>
 
@@ -67,6 +67,11 @@
   <li><strong>Type a path directly</strong>: click the pencil icon at the right of the breadcrumb (or double-click anywhere on the breadcrumb band) to flip into edit mode, type something like <code>data/2024/chunks/</code> and press <kbd>Enter</kbd>. If the prefix has no objects, a non-blocking warning notification surfaces so you can tell a typo from "empty folder".</li>
   <li><strong>Listings are capped</strong> by the <em>Max entries per folder</em> preference (Settings → Cloud Storage → Browser). The sidebar warns you if more exist; refine the breadcrumb or use Remote search.</li>
   <li><strong>Right-click any row</strong> for the per-item context menu.</li>
+  <li><strong>When the store refuses the credentials</strong> the sidebar renews them once and
+    retries by itself — an access token that expired while Arbor was closed never reaches you.
+    If the retry fails too, the error row is followed by a clickable one: <em>Sign in with
+    Google…</em> for an OAuth connection, <em>Open connection settings…</em> for every other
+    method.</li>
 </ul>
 
 <h3>Uploading</h3>

@@ -17,8 +17,11 @@
   <li>Create a <strong>Desktop</strong> OAuth client at
     <code>console.cloud.google.com/apis/credentials</code>.</li>
   <li>Register <code>http://127.0.0.1:7732/</code> as its redirect URI.</li>
-  <li>Paste the client id (and secret, if it issued one) into this package's settings — the
-    gear beside it in the Plugin Manager.</li>
+  <li>Paste the client id (and secret, if it issued one) into either place — they are the same
+    client: the OAuth fields on the connection itself, under
+    <strong>Cloud&nbsp;→&nbsp;Connections</strong>, or this package's settings, the gear beside
+    it in the Plugin Manager. A client entered on a connection is stored here, so the next
+    sign-in and every later refresh find it.</li>
 </ol>
 
 <h2>Connecting</h2>
@@ -40,6 +43,11 @@
 </p>
 
 <h2>Service-account keys</h2>
+<p>
+  A connection set to <em>service account file</em> keeps only the file's path. The panel reads the file each time a token is needed and
+  passes its contents in that one call; this package signs with it and keeps <em>nothing</em> of it — only the access token it buys is
+  stored. The rest of this section is about a key <em>pasted</em> into the form.
+</p>
 <p>
   Paste the key file's contents into the connection form. It is stored in this package's own
   keychain slot — the panel that took it from you does not keep a copy, because it is not the

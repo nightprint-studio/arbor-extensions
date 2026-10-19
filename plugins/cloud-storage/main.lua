@@ -15,6 +15,18 @@ local chunks           = require("chunks")
 local provider         = require("provider")
 local secrets          = require("secrets")
 
+-- ── Formatting ──────────────────────────────────────────────────────────────
+
+--- A store's `modified` — unix seconds, or absent — as a line a person reads.
+---
+--- Absent rather than zero for a synthesised folder, which is why this takes `nil` as an
+--- ordinary input: several stores report no timestamp for a prefix, and "1970-01-01" in a
+--- properties dialog is a fabricated fact.
+local function format_modified(secs)
+  if type(secs) ~= "number" or secs <= 0 then return "—" end
+  return os.date("%Y-%m-%d %H:%M:%S", math.floor(secs))
+end
+
 -- ── Lifecycle ───────────────────────────────────────────────────────────────
 
 -- Right-click items. Re-runnable: it unregisters + re-contributes so the
@@ -262,6 +274,19 @@ arbor.events.on("cloud:upload_picker", function(_ctx)
   transfer.upload_picker()
 end)
 
+-- The remedy row the sidebar shows when a listing was refused for credentials. An OAuth
+-- connection can be fixed from here in one click; every other method needs a form, and the
+-- connections manager is that form.
+arbor.events.on("cloud:fix_auth", function(ctx)
+  local d = ctx.data or {}
+  if not d.conn_id then return end
+  if d.oauth then
+    arbor.events.emit("cloud:start_oauth_for", { config_id = d.conn_id })
+    return
+  end
+  connections_modal.open(d.conn_id)
+end)
+
 -- ── Connection picker / navigation ─────────────────────────────────────────
 
 arbor.events.on("cloud:select_connection", function(ctx)
@@ -348,11 +373,12 @@ arbor.events.on("cloud:stat_modal", function(ctx)
     width         = "560px",
     height        = "520px",
     nodes = {
-      { type = "text", name = "path",  label = "Path",         default = obj.path or "",                  readonly = true },
+      -- `obj` is the provider interface's `object`: `key`, and `modified` as unix seconds.
+      { type = "text", name = "path",  label = "Path",         default = obj.key or d.path,               readonly = true },
       { type = "text", name = "size",  label = "Size (bytes)", default = tostring(obj.size or ""),        readonly = true },
       { type = "text", name = "type",  label = "Content type", default = obj.content_type or "",          readonly = true },
       { type = "text", name = "etag",  label = "ETag",         default = obj.etag or "",                  readonly = true },
-      { type = "text", name = "mtime", label = "Last modified",default = obj.last_modified or "",         readonly = true },
+      { type = "text", name = "mtime", label = "Last modified",default = format_modified(obj.modified),   readonly = true },
     },
   })
 end)
@@ -542,7 +568,11 @@ arbor.events.on("cloud:save_connection", function(ctx)
     -- send the user through consent again.
     arbor.service.call("cloud-gcs.status", {}, function(ok, res)
       if not ok or not (res and res.connected) then
-        arbor.events.emit("cloud:start_oauth_for", { config_id = conn.id })
+        arbor.events.emit("cloud:start_oauth_for", {
+          config_id     = conn.id,
+          client_id     = ctx.oauth_client_id or "",
+          client_secret = ctx.oauth_client_secret or "",
+        })
       end
     end)
   end
@@ -558,45 +588,8 @@ arbor.events.on("cloud:cancel_form", function(_ctx) end)
 arbor.events.on("cloud:test_connection_inline", function(ctx)
   local sctx = ctx.state or {}
   local conn = read_form_into_conn(ctx, sctx)
-  arbor.notify{ title = "Testing connection…", message = conn.name or "", level = "info" }
-  -- One call, and it blocks this VM while the store answers — a zero-length listing, so the
-  -- wait is a round trip and not a transfer. The old shape dispatched and waited for an event
-  -- because the work was the host's; now the work is here, and an event to reach itself would
-  -- be ceremony.
-  local bucket = ctx.default_bucket or conn.default_bucket or ""
-  local _, err = provider.test(conn, bucket)
-  arbor.events.emit("cloud:test_connection_inline_done", {
-    ok         = err == nil,
-    error      = err,
-    request_id = tostring(conn.id or "inline"),
-  })
+  provider.test_and_notify(conn, ctx.default_bucket or conn.default_bucket or "")
 end)
-
--- Shared handler for both the inline-form and the connections-modal tests —
--- the only difference between the two flows is the event name (so a
--- modal-triggered test never lands on an inline form callback or vice
--- versa). Same result UX in both cases.
-local function handle_test_done(ev)
-  if not ev.ok then
-    arbor.notify{ title = "Test failed", message = tostring(ev.error or "unknown error"), level = "error" }
-    return
-  end
-  local rep = ev.reply or {}
-  if rep.ok then
-    local detail = "Auth: " .. (rep.auth_method or "?")
-    if rep.identity and rep.identity ~= "" then detail = detail .. " · " .. rep.identity end
-    arbor.notify{ title = "Connection OK", message = detail, level = "success" }
-  else
-    arbor.notify{
-      title = "Connection failed",
-      message = rep.error or "unknown error",
-      level = "error"
-    }
-  end
-end
-
-arbor.events.on("cloud:test_connection_inline_done", handle_test_done)
-arbor.events.on("cloud:test_connection_modal_done",  handle_test_done)
 
 arbor.events.on("cloud:start_oauth_inline", function(ctx)
   local sctx = ctx.state or {}
@@ -619,7 +612,13 @@ arbor.events.on("cloud:start_oauth_for", function(ev)
   -- knows which endpoints and scopes its store wants. This panel asks by name and stays
   -- ignorant of Google — which is what lets a second store be added without editing it.
   local service = (conn.provider or "gcs")
-  arbor.service.call("cloud-" .. service .. ".connect", {}, function(ok, res)
+  -- The OAuth client travels with the request. It is asked for on the connection form, so a
+  -- panel that kept it to itself would leave the provider signing in with whatever it had
+  -- stored — usually nothing, and the flow fails for want of the value on screen.
+  arbor.service.call("cloud-" .. service .. ".connect", {
+    client_id     = ev.client_id or (conn.gcs and conn.gcs.client_id) or "",
+    client_secret = ev.client_secret or "",
+  }, function(ok, res)
     if not ok or not (res and res.ok) then
       local msg = (res and res.error) or "the provider package could not start the sign-in"
       arbor.notify{ title = "Authorize failed", message = tostring(msg), level = "error" }

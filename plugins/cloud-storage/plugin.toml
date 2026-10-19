@@ -1,5 +1,5 @@
 name        = "cloud-storage"
-version     = "1.0.1"
+version     = "1.0.3"
 description = "Object storage in Arbor — browse, upload, download and sync buckets. The panel and the connection settings; the backends that talk to each store ship as their own packages."
 author      = "Nightprint Studio"
 repository  = "https://github.com/nightprint-studio/arbor-extensions"

@@ -221,6 +221,44 @@ local function err_node(message)
            kind = "section", badge_kind = "error" }
 end
 
+--- The rows to show when a store refused us. The error, and the thing to press about it.
+---
+--- A credential failure is the one listing error the user can act on from here, and an error
+--- row alone leaves them reading "no access token stored" with no idea that the fix is two
+--- panels away. The remedy row is a single click (`selection_action`), not a double: it is
+--- the only actionable row on screen, and a row nobody knows is actionable is not one.
+local function auth_nodes(conn, message)
+  local nodes = { err_node(message) }
+  local by_oauth = (conn.gcs or {}).method == "oauth"
+  nodes[#nodes + 1] = {
+    id              = "fix-auth",
+    label           = by_oauth and "Sign in with Google…" or "Open connection settings…",
+    icon            = by_oauth and "LogIn" or "Settings2",
+    kind            = "runnable",
+    selectable      = true,
+    selection_action = "cloud:fix_auth",
+    data            = { conn_id = conn.id, oauth = by_oauth },
+    tooltip         = by_oauth
+      and "Authorize this connection's Google account"
+      or "Edit this connection's credentials",
+  }
+  return nodes
+end
+
+--- Whether a provider's failure is about credentials rather than about the store.
+---
+--- Matched on the message because that is all the interface gives back: `arbor.ext.call`
+--- raises with the guest's error rendered as text, and the variant (`auth`, `denied`) is in
+--- it. Narrow on purpose — a 404 on one key must not offer to re-authorise a connection that
+--- is working.
+local function is_auth_error(err)
+  local msg = tostring(err or ""):lower()
+  return msg:find("auth", 1, true) ~= nil
+      or msg:find("denied", 1, true) ~= nil
+      or msg:find("token", 1, true) ~= nil
+      or msg:find("sign in", 1, true) ~= nil
+end
+
 -- ── Breadcrumb builder ─────────────────────────────────────────────────────
 -- Returns a list of segments compatible with arbor.ui.tree.set{breadcrumb=...}.
 -- The Svelte side renders them as chips above the tree; the last segment is
@@ -267,24 +305,31 @@ local function sort_rows(rows)
   return rows
 end
 
--- Build TreeNode rows directly from a flat items list (streaming).
+-- Build TreeNode rows from one listing's entries.
+--
+-- An entry is the provider interface's `object`: `key` is the full path within the bucket and
+-- `prefix` says whether it is a synthesised folder. Those two names are the contract with
+-- every provider package — the node `data` below keeps calling the same value `path`, which
+-- is this plugin's own vocabulary for what an action acts on.
 local function rows_from_items(items, conn_id, bucket)
   local rows = {}
   for _, obj in ipairs(items or {}) do
-    local seg = last_segment(obj.path) or obj.path
-    if obj.is_dir then
+    local key = obj.key or ""
+    local seg = last_segment(key)
+    if seg == "" then seg = key end
+    if obj.prefix then
       rows[#rows + 1] = {
-        id             = "d:" .. obj.path,
+        id             = "d:" .. key,
         label          = seg,
         icon           = "Folder",
         kind           = "folder",
         selectable     = true,
         default_action = "cloud:open_folder",
-        data           = { config_id = conn_id, bucket = bucket, path = obj.path },
+        data           = { config_id = conn_id, bucket = bucket, path = key },
       }
     else
       rows[#rows + 1] = {
-        id             = "f:" .. obj.path,
+        id             = "f:" .. key,
         label          = seg,
         icon           = "FileText",
         kind           = "object",
@@ -295,9 +340,13 @@ local function rows_from_items(items, conn_id, bucket)
         data           = {
           config_id    = conn_id,
           bucket       = bucket,
-          path         = obj.path,
+          path         = key,
           size         = obj.size,
           content_type = obj.content_type,
+          -- Unix seconds, as the interface reports it. Carried on the row because the chunk
+          -- merge orders parts by it, and re-`stat`ing every selected object to recover a
+          -- number the listing already had would be a round trip per part.
+          modified     = obj.modified,
         },
       }
     end
@@ -306,7 +355,9 @@ local function rows_from_items(items, conn_id, bucket)
 end
 
 -- ── Refresh entry-point ────────────────────────────────────────────────────
--- `opts.use_cache` (default true) — when false, bypass the cache and re-stream.
+-- `opts.use_cache`   (default true)  — when false, bypass the cache and re-walk.
+-- `opts.after_renew` (default false) — set only by the one retry a credential failure earns,
+--                                      so a refused credential cannot become a loop.
 
 function M.refresh(opts)
   opts = opts or {}
@@ -423,11 +474,33 @@ function M.refresh(opts)
   M._walking = nil
 
   if err then
-    arbor.ui.tree.set(SIDEBAR_ID, {
-      title      = title,
-      breadcrumb = crumb,
-      nodes      = { err_node("List failed: " .. tostring(err)) },
-    })
+    local message = "List failed: " .. tostring(err)
+    local paint = function(nodes)
+      arbor.ui.tree.set(SIDEBAR_ID, { title = title, breadcrumb = crumb, nodes = nodes })
+    end
+    if not is_auth_error(err) then
+      paint({ err_node(message) })
+      return
+    end
+    -- A token that expired while Arbor was closed fails the FIRST listing and no other:
+    -- `provider.ensure` above is asynchronous, so the renewal it starts lands after this walk
+    -- has already gone out with the stale one. Rather than show an error that fixes itself on
+    -- the next click, renew and walk again — once, guarded by `after_renew`, so a credential
+    -- that is genuinely refused ends as an error instead of a loop.
+    if opts.after_renew then
+      paint(auth_nodes(conn, message))
+      return
+    end
+    provider.ensure(conn, function(renewed, ensure_err)
+      if renewed then
+        M.refresh({ use_cache = false, after_renew = true })
+      else
+        -- The renewal's own complaint, when it has one: "not signed in yet" is a sentence
+        -- about what to do, where the store's "auth: no access token" is one about what
+        -- failed.
+        paint(auth_nodes(conn, ensure_err and tostring(ensure_err) or message))
+      end
+    end)
     return
   end
 
@@ -477,12 +550,13 @@ local function rows_from_search_items(items, conn_id, bucket, root_prefix)
   -- single object row in browse mode).
   local rows = {}
   for _, obj in ipairs(items or {}) do
-    local rel = obj.path
+    local key = obj.key or ""
+    local rel = key
     if root_prefix and root_prefix ~= "" and rel:sub(1, #root_prefix) == root_prefix then
       rel = rel:sub(#root_prefix + 1)
     end
     rows[#rows + 1] = {
-      id             = "s:" .. obj.path,
+      id             = "s:" .. key,
       label          = rel,
       icon           = "FileText",
       kind           = "object",
@@ -493,10 +567,10 @@ local function rows_from_search_items(items, conn_id, bucket, root_prefix)
       data           = {
         config_id    = conn_id,
         bucket       = bucket,
-        path         = obj.path,
+        path         = key,
         size         = obj.size,
         content_type = obj.content_type,
-        last_modified = obj.last_modified,
+        modified     = obj.modified,
       },
     }
   end
@@ -521,20 +595,6 @@ local function paint_search()
   elseif #rows == 0 then
     rows = { info_node(
       "No matches (scanned " .. tostring(s.scanned or 0) .. " entries).", "SearchX") }
-    -- Diagnostic: when opendal returned entries but the regex matched none,
-    -- show the first few raw paths so we can see what opendal is feeding us
-    -- (full keys vs. relative? leading slash?).
-    if s.regex then
-      rows[#rows + 1] = info_node("Regex: " .. tostring(s.regex), "Code")
-    end
-    if s.combined and s.combined ~= "" then
-      rows[#rows + 1] = info_node("Listing prefix: " .. tostring(s.combined), "FolderTree")
-    end
-    if s.sample_paths and #s.sample_paths > 0 then
-      for i, p in ipairs(s.sample_paths) do
-        rows[#rows + 1] = info_node("Sample " .. tostring(i) .. ": " .. tostring(p), "FileText")
-      end
-    end
   elseif s.truncated then
     rows[#rows + 1] = info_node(
       "Result list capped at " .. tostring(#s.items)
