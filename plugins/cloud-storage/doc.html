@@ -115,6 +115,8 @@
   <li><strong>Remote</strong> — input shows an accent stripe; Enter runs a wildcard search against the bucket, scoped to the current breadcrumb folder. If you start typing <code>*</code> or <code>?</code> while still in Local mode, a one-time hint appears with a <em>Search remote</em> button that promotes the query for you.</li>
 </ul>
 
+<p>A search without any wildcard is a plain, case-insensitive "contains" over the path below the current folder — <code>/</code> lists everything inside sub-folders, <code>invoice</code> every object with that in its path. A pattern without <code>/</code> is matched against the file name alone; one with <code>/</code> is matched against the whole path below the current folder.</p>
+
 <p>Pattern semantics:</p>
 
 <table>

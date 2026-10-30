@@ -608,6 +608,33 @@ local function paint_search()
   })
 end
 
+--- Predicate over full keys for a search `pattern` scoped under `root_prefix`.
+---
+--- The pattern is matched against the path *below* the searched folder, because that is what
+--- the result list shows and what `data/*/chunk_*` or a lone `/` talk about. A pattern without
+--- `/` still matches the bare file name, so `chunk_*` finds chunks at any depth. A search with
+--- no wildcard is a substring test: an exact-name match would make a half-remembered name, or
+--- a `/`, return nothing. `*` crosses folders here (as the doc promises); the toolkit's own
+--- `*` stops at `/`, so it is widened to `**` before matching.
+function M.search_matcher(pattern, root_prefix)
+  local needle = (pattern or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  local root   = root_prefix or ""
+  local function relative(key)
+    if root ~= "" and key:sub(1, #root) == root then return key:sub(#root + 1) end
+    return key
+  end
+  if not needle:find("[*?]") then
+    local lowered = needle:lower()
+    return function(key) return relative(key):lower():find(lowered, 1, true) ~= nil end
+  end
+  local glob    = needle:gsub("^/+", ""):gsub("%*+", "**")
+  local on_path = glob:find("/", 1, true) ~= nil
+  return function(key)
+    local rel = relative(key)
+    return toolkit.glob_match(glob, on_path and rel or toolkit.name_of(rel))
+  end
+end
+
 -- Entry point: start a new search. Cancels any in-flight search/list.
 function M.start_search(pattern, scope)
   if not pattern or pattern == "" then return end
@@ -643,19 +670,19 @@ function M.start_search(pattern, scope)
     truncated    = false,
     scanned      = 0,
   }
-  local search = M._search
+  local search  = M._search
+  local matches = M.search_matcher(pattern, root_prefix)
   paint_search()
 
   -- No delimiter: a search walks everything under the prefix rather than stopping at each
-  -- folder. The matching is `cloud-toolkit`'s, which is also what the providers link — so a
-  -- pattern means the same thing here as it does anywhere else in the panel.
-  local _, err = provider.list_all(conn, bucket, root_prefix, {
+  -- folder. The glob itself is `cloud-toolkit`'s, which is also what the providers link.
+  local walked, err = provider.list_all(conn, bucket, root_prefix, {
     hard_cap  = settings.list_hard_cap(),
     cancelled = function() return walk.cancelled end,
     on_page   = function(entries)
       for _, e in ipairs(entries) do
         search.scanned = search.scanned + 1
-        if not e.prefix and toolkit.glob_match(pattern, toolkit.name_of(e.key)) then
+        if not e.prefix and matches(e.key) then
           search.items[#search.items + 1] = e
         end
       end
@@ -666,6 +693,7 @@ function M.start_search(pattern, scope)
   if walk.cancelled then return end
   M._walking = nil
   search.done = true
+  search.truncated = walked ~= nil and walked.truncated == true
   if err then
     search.error = tostring(err)
     arbor.notify{ title = "Search failed", message = tostring(err), level = "error" }

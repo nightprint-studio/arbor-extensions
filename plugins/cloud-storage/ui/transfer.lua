@@ -25,9 +25,18 @@ local M = {}
 -- ── Download: object → local file ──────────────────────────────────────────
 
 function M.download_picker(ctx)
-  local d = ctx.data or {}
-  if not d.path or d.path == "" or not d.bucket or d.bucket == "" then
-    arbor.notify{ title = "Download", message = "Missing object info.", level = "error" }
+  -- The row's data rides on `ctx.data` for a double-click and a single-row menu, and on the
+  -- first of `ctx.nodes` when the host only sends the selection.
+  local d = ctx.data or ((ctx.nodes or {})[1] or {}).data or {}
+  local missing = {}
+  if not d.path or d.path == "" then missing[#missing + 1] = "path" end
+  if not d.bucket or d.bucket == "" then missing[#missing + 1] = "bucket" end
+  if #missing > 0 then
+    arbor.notify{
+      title   = "Download",
+      message = "The selected row carries no " .. table.concat(missing, " or ") .. ". Refresh the listing and try again.",
+      level   = "error",
+    }
     return
   end
   arbor.ui.pick_file({
