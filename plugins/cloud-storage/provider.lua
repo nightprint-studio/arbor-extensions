@@ -141,7 +141,8 @@ function M.list(conn, bucket, prefix, opts)
     prefix or "",
     opts.delimiter,
     opts.cursor,
-    opts.limit
+    opts.limit,
+    opts.match_glob
   ))
 end
 
@@ -154,6 +155,13 @@ function M.list_all(conn, bucket, prefix, opts)
   opts = opts or {}
   local cap       = opts.hard_cap or 10000
   local delimiter = opts.delimiter
+  -- A walk that only FILTERS (a search) must not hold every key it scans: the cap there bounds
+  -- the matches it keeps, and `max_scan` bounds the walk itself. With `collect = false` nothing
+  -- is accumulated and `cap` is not applied — the caller stops the walk by returning true from
+  -- `on_page`, which is what lets a search cover a whole bucket instead of its first page-fulls.
+  local collect   = opts.collect ~= false
+  local max_scan  = opts.max_scan
+  local scanned   = 0
   local out, cursor, truncated = {}, nil, false
 
   repeat
@@ -161,6 +169,7 @@ function M.list_all(conn, bucket, prefix, opts)
       delimiter = delimiter,
       cursor    = cursor,
       limit     = opts.page_size or 1000,
+      match_glob = opts.match_glob,
     })
     if err then return nil, err end
     if type(page) ~= "table" then
@@ -176,17 +185,23 @@ function M.list_all(conn, bucket, prefix, opts)
     local next_cursor = nil
     if type(page.cursor) == "string" and page.cursor ~= "" then next_cursor = page.cursor end
 
-    for _, entry in ipairs(page.entries or {}) do
-      out[#out + 1] = entry
-      if #out >= cap then truncated = true break end
+    if collect then
+      for _, entry in ipairs(page.entries or {}) do
+        out[#out + 1] = entry
+        if #out >= cap then truncated = true break end
+      end
     end
-    if opts.on_page then opts.on_page(page.entries or {}, next_cursor == nil) end
+    scanned = scanned + #(page.entries or {})
+    if opts.on_page and opts.on_page(page.entries or {}, next_cursor == nil) == true then
+      truncated = true
+    end
+    if max_scan and scanned >= max_scan and next_cursor ~= nil then truncated = true end
     if opts.cancelled and opts.cancelled() then break end
 
     cursor = next_cursor
   until cursor == nil or truncated
 
-  return { entries = out, truncated = truncated }, nil
+  return { entries = out, truncated = truncated, scanned = scanned }, nil
 end
 
 function M.stat(conn, bucket, key)

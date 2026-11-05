@@ -191,7 +191,13 @@ end)
 arbor.events.on("cloud:search_input_submit", function(ctx)
   local pattern = ctx.pattern or ""
   if pattern == "" then return end
-  sidebar.start_search(pattern, "current")
+  -- A hook that raises only logs, and the sidebar stays on the plain listing: which looks
+  -- exactly like "the search returned everything". Say what went wrong instead.
+  arbor.log.info("cloud-storage: remote search '" .. pattern .. "'")
+  local ok, err = pcall(sidebar.start_search, pattern, "current")
+  if not ok then
+    arbor.notify{ title = "Search failed", message = tostring(err), level = "error" }
+  end
 end)
 
 arbor.events.on("cloud:search_clear", function(_ctx)

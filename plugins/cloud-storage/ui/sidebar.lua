@@ -22,6 +22,10 @@ local toolkit  = require("toolkit")
 local M = {}
 
 local SIDEBAR_ID = "cloud"
+
+-- How many keys one search may look at before it stops and says so. Matches are capped by the
+-- `list_hard_cap` setting; this is the bound on the walk itself (a thousand keys per request).
+local SEARCH_SCAN_CEILING = 500000
 local PLUGIN     = "cloud-storage"
 local NS         = PLUGIN .. ":" .. SIDEBAR_ID
 
@@ -593,12 +597,17 @@ local function paint_search()
       icon = "Spinner", kind = "section", badge_kind = "muted",
     }
   elseif #rows == 0 then
-    rows = { info_node(
-      "No matches (scanned " .. tostring(s.scanned or 0) .. " entries).", "SearchX") }
+    -- A truncated walk that found nothing has NOT shown there is nothing: say how far it got.
+    local text = "No matches (scanned " .. tostring(s.scanned or 0) .. " entries)."
+    if s.truncated then
+      text = "No matches in the first " .. tostring(s.scanned or 0)
+        .. " entries — the search stopped there. Narrow the folder or the pattern."
+    end
+    rows = { info_node(text, "SearchX") }
   elseif s.truncated then
     rows[#rows + 1] = info_node(
-      "Result list capped at " .. tostring(#s.items)
-        .. " entries — refine the pattern to see more.", "Hash")
+      "Stopped after " .. tostring(#s.items) .. " matches / "
+        .. tostring(s.scanned or 0) .. " entries scanned — refine the pattern to see more.", "Hash")
   end
 
   arbor.ui.tree.set(SIDEBAR_ID, {
@@ -627,12 +636,93 @@ function M.search_matcher(pattern, root_prefix)
     local lowered = needle:lower()
     return function(key) return relative(key):lower():find(lowered, 1, true) ~= nil end
   end
-  local glob    = needle:gsub("^/+", ""):gsub("%*+", "**")
+  -- Lowered on both sides: the plain search above ignores case, and a glob that did not would
+  -- make `*.CSV` and `csv` disagree about the same bucket.
+  local glob    = needle:gsub("^/+", ""):gsub("%*+", "**"):lower()
   local on_path = glob:find("/", 1, true) ~= nil
+  local lua_pat = M.glob_to_lua_pattern(glob)
   return function(key)
-    local rel = relative(key)
-    return toolkit.glob_match(glob, on_path and rel or toolkit.name_of(rel))
+    local rel = relative(key):lower()
+    return (on_path and rel or (rel:match("([^/]*)$") or rel)):find(lua_pat) ~= nil
   end
+end
+
+--- The same search as a glob the STORE can apply (`match-glob` of the provider's `list`), so it
+--- sends back the keys that match instead of every key for this side to throw away. Case is
+--- folded the way `search_matcher` does it, by turning each letter into a `[xX]` class — the
+--- store's glob is case-sensitive. A name-only pattern may sit at any depth, hence the pair of
+--- alternatives. Returns nil when it cannot be said safely (a folder name with glob characters
+--- in it); the local matcher then does all of the work, which is slower and just as right.
+function M.server_glob(pattern, root_prefix)
+  local root = root_prefix or ""
+  if root:find("[%*%?%[%]{}\\]") then return nil end
+  local needle = (pattern or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if needle == "" then return nil end
+  local wildcard = needle:find("[*?]") ~= nil
+  if wildcard then
+    needle = needle:gsub("^/+", ""):gsub("%*+", "**")
+  end
+  local out = {}
+  for ch in needle:gmatch(utf8.charpattern) do
+    if ch == "*" or ch == "?" then
+      out[#out + 1] = ch
+    elseif ch:find("^[%[%]{}\\]$") then
+      out[#out + 1] = "\\" .. ch
+    elseif ch:find("^%a$") then
+      out[#out + 1] = "[" .. ch:lower() .. ch:upper() .. "]"
+    else
+      out[#out + 1] = ch
+    end
+  end
+  local g = table.concat(out)
+  g = g:gsub("%*%*+", "**")
+  if not wildcard then return root .. "**" .. g .. "**" end
+  if g:find("/", 1, true) then return root .. g end
+  return root .. "{" .. g .. ",**/" .. g .. "}"
+end
+
+--- A glob as an anchored Lua pattern: `?` is one character, `*` any run, neither crossing `/`;
+--- `**` crosses.
+---
+--- Translated once per search and matched by the VM's own C matcher. A search tests every key of
+--- a bucket — tens of thousands — and a per-key glob walked in Lua (or sent through the toolkit
+--- package) is what made it crawl. Everything that is not a wildcard is escaped, so a `.` or `-`
+--- in a file name means itself.
+function M.glob_to_lua_pattern(glob)
+  local out, i = { "^" }, 1
+  while i <= #glob do
+    local c = glob:sub(i, i)
+    if c == "*" then
+      if glob:sub(i + 1, i + 1) == "*" then
+        out[#out + 1] = ".*"
+        i = i + 1
+      else
+        out[#out + 1] = "[^/]*"
+      end
+    elseif c == "?" then
+      out[#out + 1] = "[^/]"
+    else
+      out[#out + 1] = c:gsub("%W", "%%%0")
+    end
+    i = i + 1
+  end
+  out[#out + 1] = "$"
+  return table.concat(out)
+end
+
+--- Where the walk can start. A pattern like `data/2026/**/*.csv` can only match below
+--- `data/2026/`, so the store is asked for that prefix instead of the whole folder — on a big
+--- bucket the difference between a search and a scan. Taken in the case typed, because the
+--- store's prefix is case-sensitive. A pattern without `/` matches names at any depth and
+--- narrows nothing.
+function M.search_prefix(pattern, root_prefix)
+  local root   = root_prefix or ""
+  local needle = (pattern or ""):gsub("^%s+", ""):gsub("%s+$", ""):gsub("^/+", "")
+  -- Without a wildcard the search is a substring test, which can match across any folder.
+  if not needle:find("[*?]") or not needle:find("/", 1, true) then return root end
+  local literal = needle:match("^([^*?]*)") or ""
+  local dir     = literal:match("^(.*/)") or ""
+  return root .. dir
 end
 
 -- Entry point: start a new search. Cancels any in-flight search/list.
@@ -676,19 +766,70 @@ function M.start_search(pattern, scope)
 
   -- No delimiter: a search walks everything under the prefix rather than stopping at each
   -- folder. The glob itself is `cloud-toolkit`'s, which is also what the providers link.
-  local walked, err = provider.list_all(conn, bucket, root_prefix, {
-    hard_cap  = settings.list_hard_cap(),
+  --
+  -- The list cap bounds the MATCHES kept, never the keys scanned: capping the scan is what made a
+  -- search over a big bucket look at its first few thousand keys and report "no matches". The walk
+  -- has its own, much higher, ceiling so a runaway bucket still ends.
+  local match_cap = settings.list_hard_cap()
+
+  -- The walk blocks this plugin's VM page after page, so the tree may not repaint until it is
+  -- over; the progress card is the surface that is drawn by the host and says it is working.
+  local op_id = "cloud:search:" .. tostring(os.time()) .. ":" .. tostring(math.random(1, 1000000))
+  pcall(function()
+    arbor.ui.operation.start{
+      id       = op_id,
+      title    = "Searching " .. bucket,
+      subtitle = pattern,
+      steps    = { { key = "scan", label = "Scanning the bucket" } },
+      current  = "scan",
+    }
+  end)
+
+  local pages = 0
+  local started_at = os.time()
+  local walked, err = provider.list_all(conn, bucket, M.search_prefix(pattern, root_prefix), {
+    collect    = false,
+    max_scan   = SEARCH_SCAN_CEILING,
+    -- The store filters first; `matches` below still runs on what comes back, so a store that
+    -- ignores the glob (or reads it slightly differently) cannot make the results wrong.
+    match_glob = M.server_glob(pattern, root_prefix),
     cancelled = function() return walk.cancelled end,
     on_page   = function(entries)
+      pages = pages + 1
       for _, e in ipairs(entries) do
         search.scanned = search.scanned + 1
-        if not e.prefix and matches(e.key) then
+        if not e.prefix and #search.items < match_cap and matches(e.key) then
           search.items[#search.items + 1] = e
         end
       end
-      paint_search()
+      pcall(function()
+        arbor.ui.operation.set_current(op_id, "scan",
+          tostring(search.scanned) .. " scanned · " .. tostring(#search.items) .. " matches")
+      end)
+      -- Rebuilding every row on every page is quadratic in the matches; the first page and then
+      -- every few are enough to watch it fill.
+      if pages == 1 or pages % 5 == 0 then paint_search() end
+      -- Stop as soon as the list is full: the rest could only be dropped.
+      return #search.items >= match_cap
     end,
   })
+
+  pcall(function()
+    arbor.ui.operation.finish(op_id, {
+      summary = tostring(#search.items) .. " matches in " .. tostring(search.scanned) .. " entries",
+      error   = err and tostring(err) or nil,
+    })
+  end)
+
+  -- Where the time went, said once at the end: the card above may not be drawn while the walk
+  -- holds the VM, and "slow" is only fixable once it is a number. Each page is one round trip.
+  local elapsed = os.time() - started_at
+  local summary = tostring(pages) .. " pages, " .. tostring(search.scanned) .. " keys, "
+    .. tostring(elapsed) .. " s"
+  if pages > 0 and elapsed > 0 then
+    summary = summary .. string.format(" (%.1f s per page)", elapsed / pages)
+  end
+  arbor.log.info("cloud-storage: search done — " .. summary)
 
   if walk.cancelled then return end
   M._walking = nil

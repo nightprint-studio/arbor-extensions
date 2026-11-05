@@ -140,7 +140,7 @@
 
 <p>Results render as a flat list (full paths) in the sidebar. Double-click downloads; right-click works as on regular file rows (multi-select supported — useful for picking N chunks scattered across folders and feeding them to <em>Download chunks (custom order)</em>). Click the <em>clear ✕</em> chip in the breadcrumb to exit search mode and go back to browsing.</p>
 
-<p>The result list is capped at 5000 matches; if you hit the cap, refine the pattern to narrow the scope.</p>
+<p>Wildcard patterns are case-insensitive, like the plain search. The search walks the whole folder, not just what is already loaded: the <em>Max entries per folder</em> preference caps the <strong>matches</strong> kept (default 5000), and the walk itself stops after 500,000 keys, saying so. A pattern with a leading folder part, such as <code>data/2026/**/*.csv</code>, only lists below that folder (in the case you typed), which makes it much faster on a large bucket.</p>
 
 <h3>Bulk operations &amp; chunk-merge</h3>
 

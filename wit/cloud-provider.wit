@@ -120,6 +120,11 @@ interface cloud-provider {
   ///
   /// `delimiter` set to `/` gives the folder-shaped view the explorer renders; unset walks
   /// everything under the prefix, which is what a search does.
+  ///
+  /// `match-glob` asks the STORE to keep only the keys matching a glob (`*` and `?` stay inside
+  /// one folder, `**` crosses, `[ab]` and `{x,y}` as the store defines them), matched against
+  /// the whole key and case-sensitively. A store that cannot filter ignores it and the caller
+  /// filters the page itself, so it is an optimisation and never the only filter.
   // `%list`: `list` is a WIT keyword (the built-in `list<T>`), and the escape is what the
   // language provides for exactly this. Renaming it would cost the one word every object
   // store calls this operation.
@@ -129,6 +134,7 @@ interface cloud-provider {
     delimiter: option<string>,
     cursor: option<string>,
     limit: option<u32>,
+    match-glob: option<string>,
   ) -> result<listing, error>;
 
   /// Metadata for one key, without fetching it.

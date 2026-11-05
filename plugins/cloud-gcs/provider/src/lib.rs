@@ -250,10 +250,20 @@ impl Guest for Provider {
         delimiter: Option<String>,
         cursor: Option<String>,
         limit: Option<u32>,
+        match_glob: Option<String>,
     ) -> Result<Listing, Error> {
         let bucket = target(&at)?;
         let t = token()?;
         let mut url = format!("{API}/b/{}/o?", enc(bucket));
+        // Only what the explorer reads. The default response carries a dozen more fields per
+        // object (acl-ish links, crc32c, md5, storage class, …), and a page is a thousand of
+        // them: it is most of the bytes of a listing, parsed here and lowered to the caller.
+        url.push_str(
+            "fields=nextPageToken,prefixes,items(name,size,updated,etag,contentType)&",
+        );
+        if let Some(g) = match_glob.as_deref().filter(|g| !g.is_empty()) {
+            url.push_str(&format!("matchGlob={}&", enc_query(g)));
+        }
         if !prefix.is_empty() {
             url.push_str(&format!("prefix={}&", enc_query(&prefix)));
         }
